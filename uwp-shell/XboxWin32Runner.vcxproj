@@ -156,24 +156,24 @@
     <None Include="packages.config" />
   </ItemGroup>
   <ItemGroup>
-    <Content Include="Assets\Square150x150Logo.png">
+    <None Include="Assets\Square150x150Logo.png">
       <DeploymentContent>true</DeploymentContent>
-    </Content>
-    <Content Include="Assets\Square44x44Logo.png">
+    </None>
+    <None Include="Assets\Square44x44Logo.png">
       <DeploymentContent>true</DeploymentContent>
-    </Content>
-    <Content Include="Assets\Wide310x150Logo.png">
+    </None>
+    <None Include="Assets\Wide310x150Logo.png">
       <DeploymentContent>true</DeploymentContent>
-    </Content>
-    <Content Include="Assets\StoreLogo.png">
+    </None>
+    <None Include="Assets\StoreLogo.png">
       <DeploymentContent>true</DeploymentContent>
-    </Content>
-    <Content Include="Assets\SplashScreen.png">
+    </None>
+    <None Include="Assets\SplashScreen.png">
       <DeploymentContent>true</DeploymentContent>
-    </Content>
-    <Content Include="Assets\LockScreenLogo.png">
+    </None>
+    <None Include="Assets\LockScreenLogo.png">
       <DeploymentContent>true</DeploymentContent>
-    </Content>
+    </None>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets" />
