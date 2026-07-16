@@ -2024,13 +2024,13 @@
 // ----------------------------------------------------------------------------
 // Property key struct (used by some shell32 paths)
 // ----------------------------------------------------------------------------
-#if !defined(_PROPERTYKEY_DEFINED) && !defined(__PROPERTYKEY_DEFINED__)
-#define _PROPERTYKEY_DEFINED
-#define __PROPERTYKEY_DEFINED__
+// The real SDK uses _PROPERTYKEY_DEFINED as the guard. Our stub also needs it.
+#if !defined(_PROPERTYKEY_DEFINED)
 typedef struct _tagpropertykey {
     GUID fmtid;
     DWORD pid;
 } PROPERTYKEY;
+#define _PROPERTYKEY_DEFINED
 #endif
 
 // ----------------------------------------------------------------------------

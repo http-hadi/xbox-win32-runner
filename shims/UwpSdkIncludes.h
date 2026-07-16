@@ -180,6 +180,9 @@
   #include <windows.h>
 
   // Extra headers NOT included by <windows.h>:
+  // IP Helper + ICMP — iphlpapi.h MUST come before icmpapi.h
+  #include <iphlpapi.h>
+  #include <icmpapi.h>
   #include <xinput.h>
   #include <xaudio2.h>
   #include <d3d11.h>

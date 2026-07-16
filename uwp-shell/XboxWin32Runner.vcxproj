@@ -54,6 +54,7 @@
       <CompileAsWinRT>false</CompileAsWinRT>
       <ForcedIncludeFiles>CommonPre.h</ForcedIncludeFiles>
       <PreprocessorDefinitions>_UNICODE;UNICODE;WINRT_ENABLED;XWR_UWP_BUILD;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <UndefinePreprocessorDefinitions>WIN32_LEAN_AND_MEAN;NOGDI;NOUSER;NOSERVICE;NOSOUND;NOCOMM;NOCRYPT;NOHELP;NOMCX;%(UndefinePreprocessorDefinitions)</UndefinePreprocessorDefinitions>
       <AdditionalIncludeDirectories>$(ProjectDir);$(ProjectDir)..\pe-loader;$(ProjectDir)..\shims;$(ProjectDir)..\shims\kernel32;$(ProjectDir)..\shims\user32;$(ProjectDir)..\shims\gdi32;$(ProjectDir)..\shims\advapi32;$(ProjectDir)..\shims\shell32;$(ProjectDir)..\shims\shlwapi;$(ProjectDir)..\shims\ole32;$(ProjectDir)..\shims\winmm;$(ProjectDir)..\shims\version;$(ProjectDir)..\shims\pass-through;$(ProjectDir)..\shims\stubs;$(ProjectDir)..\shims\legacy;$(ProjectDir)..\d3d11-bridge;$(ProjectDir)..\bridges;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp17</LanguageStandard>
       <DisableSpecificWarnings>4996;4505;4273;4005;4164;4229;4244;4267;4311;4302;4065;4189;4101;4456;4458;4702;4703;4706;4715;4459;4477;4820;4668;4061;4365;4774;4201;4324;4514;4625;4626;5026;5027;4623;4255;4371;4710;4820;4548;4191;4099;26812</DisableSpecificWarnings>
