@@ -73,39 +73,11 @@ jobs:
           nuget restore XboxWin32Runner.sln 2>&1 | Out-Null
           Write-Host "NuGet restore complete"
 
-      - name: Find and kill WIN32_LEAN_AND_MEAN everywhere
-        shell: pwsh
+      - name: Kill WIN32_LEAN_AND_MEAN from UWP build targets
+        shell: cmd
         run: |
-          # Search ALL .props, .targets, and .cpp files in the SDK for WIN32_LEAN_AND_MEAN
-          Write-Host "Searching for WIN32_LEAN_AND_MEAN in SDK build files..."
-          $allFiles = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\" -Recurse -Include "*.props","*.targets","*.cpp","*.h" -ErrorAction SilentlyContinue
-          $found = @()
-          foreach ($f in $allFiles) {
-            try {
-              $content = Get-Content $f.FullName -Raw -ErrorAction SilentlyContinue
-              if ($content -and ($content -match 'WIN32_LEAN_AND_MEAN')) {
-                $found += $f.FullName
-                # Replace it
-                $content = $content -replace 'WIN32_LEAN_AND_MEAN', 'WIN32_LEAN_AND_MEAN_DISABLED'
-                Set-Content $f.FullName -Value $content -ErrorAction SilentlyContinue
-              }
-            } catch {}
-          }
-          Write-Host "Found and patched $($found.Count) files:"
-          $found | ForEach-Object { Write-Host "  $_" }
-          
-          # Also check MSBuild targets
-          $msbuildFiles = Get-ChildItem "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\MSBuild\" -Recurse -Include "*.props","*.targets" -ErrorAction SilentlyContinue
-          foreach ($f in $msbuildFiles) {
-            try {
-              $content = Get-Content $f.FullName -Raw -ErrorAction SilentlyContinue
-              if ($content -and ($content -match 'WIN32_LEAN_AND_MEAN')) {
-                $content = $content -replace 'WIN32_LEAN_AND_MEAN', 'WIN32_LEAN_AND_MEAN_DISABLED'
-                Set-Content $f.FullName -Value $content -ErrorAction SilentlyContinue
-                Write-Host "Patched MSBuild: $($f.FullName)"
-              }
-            } catch {}
-          }
+          :: Fast search-and-replace using findstr + powershell, only in the build directory
+          powershell -Command "Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\build\' -Recurse -Include '*.props','*.targets' | ForEach-Object { $c = Get-Content $_.FullName -Raw; if ($c -match 'WIN32_LEAN_AND_MEAN') { $c = $c -replace 'WIN32_LEAN_AND_MEAN','WIN32_LEAN_DISABLED'; Set-Content $_.FullName -Value $c; Write-Host ('Patched: ' + $_.Name) } }"
 
       - name: Build (Debug x64)
         shell: pwsh
