@@ -112,11 +112,15 @@
 #define WGL_CONTEXT_FORWARD_COMPATIBLE_BIT_ARB 0x00000002
 #endif
 
-#ifndef HGLRC
-typedef DWORD HGLRC;
-#endif
-#ifndef GLubyte
-typedef unsigned char GLubyte;
+// HGLRC is typedef'd by <wingdi.h> under MSVC. On Linux (stub Windows.h) we
+// declare it locally so the shim's signatures compile.
+#ifndef _MSC_VER
+  #ifndef HGLRC
+  typedef DWORD HGLRC;
+  #endif
+  #ifndef GLubyte
+  typedef unsigned char GLubyte;
+  #endif
 #endif
 
 namespace xwr {

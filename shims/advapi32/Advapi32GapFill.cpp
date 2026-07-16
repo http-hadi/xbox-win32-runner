@@ -211,9 +211,9 @@ extern "C" BOOL __stdcall Shim_CryptDestroyKey(HCRYPTKEY hKey) {
 }
 
 extern "C" BOOL __stdcall Shim_CryptEnumProvidersW(DWORD dwIndex, DWORD* pdwReserved,
-                                                   DWORD* pdwProvType, DWORD* pdwFlags,
+                                                   DWORD dwProvType, DWORD* pdwFlags,
                                                    LPWSTR pszProvName, DWORD* pcbProvName) {
-    return ::CryptEnumProvidersW(dwIndex, pdwReserved, pdwProvType, pdwFlags, pszProvName, pcbProvName);
+    return ::CryptEnumProvidersW(dwIndex, pdwReserved, dwProvType, pdwFlags, pszProvName, pcbProvName);
 }
 
 extern "C" BOOL __stdcall Shim_CryptExportKey(HCRYPTKEY hKey, HCRYPTKEY hExpKey, DWORD dwBlobType,
@@ -387,18 +387,16 @@ extern "C" BOOL __stdcall Shim_LookupPrivilegeValueW(LPCWSTR lpSystemName, LPCWS
     return FALSE;
 }
 
-// SystemFunction036 (RtlGenRandom) — pass through to BCryptGenRandom which
-// UWP exposes. Falls back to a software PRNG if BCrypt is unavailable.
+// SystemFunction036 (RtlGenRandom) — advapi32's SystemFunction036 is not
+// declared in the UWP SDK subset (it lives in ntsecapi.h, which is not
+// AppContainer-friendly). Forward to BCryptGenRandom with the system-preferred
+// RNG flag instead, which is the supported UWP way to get cryptographically
+// strong random bytes.
 extern "C" BOOLEAN __stdcall Shim_SystemFunction036(PVOID RandomBuffer, ULONG RandomBufferLength) {
     if (!RandomBuffer || !RandomBufferLength) return FALSE;
-    // Try the real advapi32 surface first; UWP may export SystemFunction036
-    // directly. If not, fall through to BCryptGenRandom.
-    BOOLEAN ok = ::SystemFunction036(RandomBuffer, RandomBufferLength);
-    if (ok) return TRUE;
     // BCryptGenRandom with NULL algorithm handle + BCRYPT_USE_SYSTEM_PREFERRED_RNG
     // (flag value 2) is the supported UWP way to get cryptographically strong
-    // random bytes without managing an algorithm provider. The Windows.h
-    // stub declares BCryptGenRandom as returning BOOL.
+    // random bytes without managing an algorithm provider.
     BOOL status = ::BCryptGenRandom(NULL, (PUCHAR)RandomBuffer, RandomBufferLength, 0x00000002u);
     return status ? TRUE : FALSE;
 }

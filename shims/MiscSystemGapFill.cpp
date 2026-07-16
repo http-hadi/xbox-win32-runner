@@ -53,9 +53,16 @@
   #include <setupapi.h>
   #include <cfgmgr32.h>
   #include <mmsystem.h>
+  #include <d3d12.h>
+  #include <mfobjects.h>
+  #include <winhttp.h>
+  #include <wininet.h>
   #pragma comment(lib, "setupapi.lib")
   #pragma comment(lib, "cfgmgr32.lib")
   #pragma comment(lib, "winmm.lib")
+  #pragma comment(lib, "d3d12.lib")
+  #pragma comment(lib, "winhttp.lib")
+  #pragma comment(lib, "wininet.lib")
 #endif
 
 #include <cstring>
@@ -242,20 +249,40 @@ extern "C" HRESULT __stdcall Shim_Dsound_Ord12() { return DSERR_NODRIVER; }
 // ===========================================================================
 // 10) d3d12 — 4 pass-through + 2 ordinals
 // ===========================================================================
+// D3D12CoreCreateLayeredDevice / D3D12CoreGetLayeredDeviceSize /
+// D3D12CoreRegisterLayers are internal d3d12.dll exports not declared in the
+// public d3d12.h header. Stub them to E_NOTIMPL / 0 — games using the public
+// D3D12 API never call these (they are the layering plumbing used by the
+// D3D11On12 and pix-event layers internally).
 extern "C" HRESULT __stdcall Shim_D3D12CoreCreateLayeredDevice(void* pUnknown, void* pArgs) {
-    return ::D3D12CoreCreateLayeredDevice(pUnknown, pArgs);
+    (void)pUnknown; (void)pArgs;
+    return E_NOTIMPL;
 }
 extern "C" SIZE_T  __stdcall Shim_D3D12CoreGetLayeredDeviceSize(const void* pArgs) {
-    return ::D3D12CoreGetLayeredDeviceSize(pArgs);
+    (void)pArgs;
+    return (SIZE_T)0;
 }
 extern "C" HRESULT __stdcall Shim_D3D12CoreRegisterLayers(void* pLayers, UINT NumLayers) {
-    return ::D3D12CoreRegisterLayers(pLayers, NumLayers);
+    (void)pLayers; (void)NumLayers;
+    return E_NOTIMPL;
 }
 extern "C" HRESULT __stdcall Shim_D3D12SerializeVersionedRootSignature(const void* pRootSignature,
                                                                        void** ppBlob, void** ppErrorBlob,
                                                                        UINT Flags) {
+    // Real signature: (const D3D12_VERSIONED_ROOT_SIGNATURE_DESC*, ID3DBlob**, ID3DBlob**, UINT).
+    // The shim exposes a void*/void** ABI for the loader's IAT. Cast through
+    // the public types so MSVC accepts the call. The Linux stub declares only
+    // the 3-arg form.
+#ifdef _MSC_VER
+    return ::D3D12SerializeVersionedRootSignature(
+        reinterpret_cast<const D3D12_VERSIONED_ROOT_SIGNATURE_DESC*>(pRootSignature),
+        reinterpret_cast<ID3DBlob**>(ppBlob),
+        reinterpret_cast<ID3DBlob**>(ppErrorBlob),
+        Flags);
+#else
     (void)Flags;
     return ::D3D12SerializeVersionedRootSignature(pRootSignature, ppBlob, ppErrorBlob);
+#endif
 }
 extern "C" HRESULT __stdcall Shim_D3D12_Ord101() { return E_NOTIMPL; }
 extern "C" HRESULT __stdcall Shim_D3D12_Ord102() { return E_NOTIMPL; }
@@ -475,8 +502,8 @@ extern "C" VOID    __stdcall Shim_RtlInitUnicodeString(PUNICODE_STRING Destinati
 extern "C" BOOLEAN __stdcall Shim_RtlIsCriticalSectionLockedByThread(PRTL_CRITICAL_SECTION CriticalSection) {
     return ::RtlIsCriticalSectionLockedByThread(CriticalSection);
 }
-extern "C" PVOID   __stdcall Shim_RtlLookupFunctionEntry(DWORD64 ControlPc, PDWORD ImageBase,
-                                                        PIMAGE_RUNTIME_FUNCTION_ENTRY* HistoryTable) {
+extern "C" PVOID   __stdcall Shim_RtlLookupFunctionEntry(DWORD64 ControlPc, PDWORD64 ImageBase,
+                                                        PUNWIND_HISTORY_TABLE HistoryTable) {
     return ::RtlLookupFunctionEntry(ControlPc, ImageBase, HistoryTable);
 }
 extern "C" ULONG   __stdcall Shim_RtlNtStatusToDosError(NTSTATUS Status) {
@@ -495,7 +522,7 @@ extern "C" VOID    __stdcall Shim_RtlUnwind(PVOID TargetFrame, PVOID TargetIp, P
 }
 extern "C" VOID    __stdcall Shim_RtlUnwindEx(PVOID TargetFrame, PVOID TargetIp, PEXCEPTION_RECORD ExceptionRecord,
                                               PVOID ReturnValue, PCONTEXT ContextRecord,
-                                              PEXCEPTION_HISTORY_TABLE HistoryTable) {
+                                              PUNWIND_HISTORY_TABLE HistoryTable) {
     ::RtlUnwindEx(TargetFrame, TargetIp, ExceptionRecord, ReturnValue, ContextRecord, HistoryTable);
 }
 extern "C" NTSTATUS __stdcall Shim_RtlUTF8ToUnicodeN(PWSTR UnicodeStringDestination,
@@ -508,7 +535,7 @@ extern "C" NTSTATUS __stdcall Shim_RtlUTF8ToUnicodeN(PWSTR UnicodeStringDestinat
 extern "C" PEXCEPTION_ROUTINE __stdcall Shim_RtlVirtualUnwind(DWORD HandlerType, DWORD64 ImageBase, DWORD64 ControlPc,
                                                    PIMAGE_RUNTIME_FUNCTION_ENTRY FunctionEntry, PCONTEXT ContextRecord,
                                                    PVOID* HandlerData, PULONG_PTR EstablisherFrame,
-                                                   PEXCEPTION_ROUTINE* ContextPointers) {
+                                                   PKNONVOLATILE_CONTEXT_POINTERS ContextPointers) {
     return ::RtlVirtualUnwind(HandlerType, ImageBase, ControlPc, FunctionEntry, ContextRecord,
                               HandlerData, EstablisherFrame, ContextPointers);
 }

@@ -279,7 +279,7 @@ bool App::Initialize() {
     static const GUID IID_ICoreWindowInterop = {
         0x45D64A29, 0xA911, 0x4F2F, {0xA8, 0xB5, 0x92, 0xD5, 0xE4, 0xD2, 0xB1, 0xA5}};
     // The CoreWindow's IInspectable* is obtained via winrt::get_abi(coreWnd)
-    IInspectable* inspectable = winrt::get_abi(coreWnd);
+    IInspectable* inspectable = reinterpret_cast<IInspectable*>(winrt::get_abi(coreWnd));
     if (inspectable) {
         // ICoreWindowInterop layout: IUnknown + get_WindowHandle + put_WindowHandle
         struct ICoreWindowInteropVtbl {

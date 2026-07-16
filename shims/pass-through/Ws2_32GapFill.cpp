@@ -229,10 +229,10 @@ extern "C" DWORD    __stdcall Shim_WSAWaitForMultipleEvents(DWORD cEvents, const
 }
 
 // --- WSA* address/string conversion (2) — ordinal-only new ---
-extern "C" INT __stdcall Shim_WSAStringToAddressW(struct sockaddr* lpsaAddress, INT lpAddressFamily,
+extern "C" INT __stdcall Shim_WSAStringToAddressW(LPWSTR AddressString, INT AddressFamily,
                                                   LPWSAPROTOCOL_INFOW lpProtocolInfo,
-                                                  LPINT lpcbAddress, DWORD dwSize) {
-    return ::WSAStringToAddressW(lpsaAddress, lpAddressFamily, lpProtocolInfo, lpcbAddress, dwSize);
+                                                  LPSOCKADDR Address, LPINT lpAddressLength) {
+    return ::WSAStringToAddressW(AddressString, AddressFamily, lpProtocolInfo, Address, lpAddressLength);
 }
 extern "C" INT __stdcall Shim_WSAAddressToStringW(struct sockaddr* lpsaAddress, DWORD dwAddressLength,
                                                   LPWSAPROTOCOL_INFOW lpProtocolInfo,

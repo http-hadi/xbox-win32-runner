@@ -107,7 +107,7 @@ extern "C" BOOL  __stdcall Shim_TryEnterCriticalSection(LPCRITICAL_SECTION cs)  
 // ===========================================================================
 extern "C" VOID         __stdcall Shim_InitializeSListHead(PSLIST_HEADER h)                         { ::InitializeSListHead(h); }
 extern "C" PSLIST_ENTRY __stdcall Shim_InterlockedFlushSList(PSLIST_HEADER h)                       { return ::InterlockedFlushSList(h); }
-extern "C" PSLIST_ENTRY __stdcall Shim_InterlockedPopEntrySList(PSLIST_HEADER h, PSLIST_ENTRY e)    { return ::InterlockedPopEntrySList(h, e); }
+extern "C" PSLIST_ENTRY __stdcall Shim_InterlockedPopEntrySList(PSLIST_HEADER h)                              { return ::InterlockedPopEntrySList(h); }
 extern "C" PSLIST_ENTRY __stdcall Shim_InterlockedPushEntrySList(PSLIST_HEADER h, PSLIST_ENTRY e)   { return ::InterlockedPushEntrySList(h, e); }
 extern "C" USHORT       __stdcall Shim_QueryDepthSList(PSLIST_HEADER h)                             { return ::QueryDepthSList(h); }
 
@@ -197,11 +197,11 @@ extern "C" BOOL  __stdcall Shim_SetUnhandledExceptionFilter(LPTOP_LEVEL_EXCEPTIO
 // ===========================================================================
 extern "C" VOID                          __stdcall Shim_RtlCaptureContext(PCONTEXT c)                          { ::RtlCaptureContext(c); }
 extern "C" void                          __stdcall Shim_RtlCaptureStackBackTrace(ULONG skip, ULONG n, PVOID* b, PULONG h) { ::RtlCaptureStackBackTrace(skip, n, b, h); }
-extern "C" PIMAGE_RUNTIME_FUNCTION_ENTRY __stdcall Shim_RtlLookupFunctionEntry(DWORD64 pc, PDWORD base, PIMAGE_RUNTIME_FUNCTION_ENTRY* entry) { return ::RtlLookupFunctionEntry(pc, base, entry); }
+extern "C" PIMAGE_RUNTIME_FUNCTION_ENTRY __stdcall Shim_RtlLookupFunctionEntry(DWORD64 pc, PDWORD64 base, PUNWIND_HISTORY_TABLE entry) { return ::RtlLookupFunctionEntry(pc, base, entry); }
 extern "C" PVOID                         __stdcall Shim_RtlPcToFileHeader(PVOID pc, PVOID* base)              { return ::RtlPcToFileHeader(pc, base); }
 extern "C" VOID                          __stdcall Shim_RtlUnwind(PVOID a, PVOID b, PEXCEPTION_RECORD r, PVOID c)        { ::RtlUnwind(a, b, r, c); }
-extern "C" VOID                          __stdcall Shim_RtlUnwindEx(PVOID a, PVOID b, PEXCEPTION_RECORD r, PVOID c, PCONTEXT ctx, PEXCEPTION_HISTORY_TABLE t) { ::RtlUnwindEx(a, b, r, c, ctx, t); }
-extern "C" PEXCEPTION_ROUTINE            __stdcall Shim_RtlVirtualUnwind(DWORD v, DWORD64 a, DWORD64 b, PIMAGE_RUNTIME_FUNCTION_ENTRY e, PCONTEXT c, PVOID* p, PULONG_PTR s, PEXCEPTION_ROUTINE* r) { return ::RtlVirtualUnwind(v, a, b, e, c, p, s, r); }
+extern "C" VOID                          __stdcall Shim_RtlUnwindEx(PVOID a, PVOID b, PEXCEPTION_RECORD r, PVOID c, PCONTEXT ctx, PUNWIND_HISTORY_TABLE t) { ::RtlUnwindEx(a, b, r, c, ctx, t); }
+extern "C" PEXCEPTION_ROUTINE            __stdcall Shim_RtlVirtualUnwind(DWORD v, DWORD64 a, DWORD64 b, PIMAGE_RUNTIME_FUNCTION_ENTRY e, PCONTEXT c, PVOID* p, PULONG_PTR s, PKNONVOLATILE_CONTEXT_POINTERS r) { return ::RtlVirtualUnwind(v, a, b, e, c, p, s, r); }
 
 // ===========================================================================
 // Process / thread info (many)
@@ -256,8 +256,8 @@ extern "C" LCID   __stdcall Shim_GetThreadLocale()                              
 extern "C" BOOL   __stdcall Shim_GetNumaHighestNodeNumber(PULONG n)              { return ::GetNumaHighestNodeNumber(n); }
 extern "C" BOOL   __stdcall Shim_GetNumaNodeProcessorMask(UCHAR n, PULONGLONG m) { return ::GetNumaNodeProcessorMask(n, m); }
 extern "C" BOOL   __stdcall Shim_GetNumaNodeProcessorMaskEx(USHORT n, PGROUP_AFFINITY m) { return ::GetNumaNodeProcessorMaskEx(n, m); }
-extern "C" UCHAR  __stdcall Shim_GetNumaProcessorNode(UCHAR p)                  { return ::GetNumaProcessorNode(p); }
-extern "C" USHORT __stdcall Shim_GetNumaProcessorNodeEx(PPROCESSOR_NUMBER p)    { return ::GetNumaProcessorNodeEx(p); }
+extern "C" BOOL   __stdcall Shim_GetNumaProcessorNode(UCHAR p, PUCHAR n)             { return ::GetNumaProcessorNode(p, n); }
+extern "C" BOOL   __stdcall Shim_GetNumaProcessorNodeEx(PPROCESSOR_NUMBER p, PUSHORT n) { return ::GetNumaProcessorNodeEx(p, n); }
 
 // ===========================================================================
 // Logical processor info (2)
@@ -269,7 +269,7 @@ extern "C" BOOL __stdcall Shim_GetLogicalProcessorInformationEx(LOGICAL_PROCESSO
 // File ops / mapping (many)
 // ===========================================================================
 extern "C" HRESULT __stdcall Shim_CopyFile2(LPCWSTR a, LPCWSTR b, COPYFILE2_EXTENDED_PARAMETERS* p)   { return ::CopyFile2(a, b, p); }
-extern "C" HANDLE  __stdcall Shim_CreateFile2(LPCWSTR a, DWORD b, DWORD c, DWORD d, const CREATEFILE2_EXTENDED_PARAMETERS* e) { return ::CreateFile2(a, b, c, d, e); }
+extern "C" HANDLE  __stdcall Shim_CreateFile2(LPCWSTR a, DWORD b, DWORD c, DWORD d, const CREATEFILE2_EXTENDED_PARAMETERS* e) { return ::CreateFile2(a, b, c, d, const_cast<LPCREATEFILE2_EXTENDED_PARAMETERS>(e)); }
 extern "C" HANDLE  __stdcall Shim_CreateFileMappingA(HANDLE a, LPSECURITY_ATTRIBUTES b, DWORD c, DWORD d, DWORD e, LPCSTR f)   { return ::CreateFileMappingA(a, b, c, d, e, f); }
 extern "C" HANDLE  __stdcall Shim_CreateFileMappingW(HANDLE a, LPSECURITY_ATTRIBUTES b, DWORD c, DWORD d, DWORD e, LPCWSTR f)  { return ::CreateFileMappingW(a, b, c, d, e, f); }
 extern "C" LPVOID  __stdcall Shim_MapViewOfFile(HANDLE a, DWORD b, DWORD c, DWORD d, SIZE_T e)        { return ::MapViewOfFile(a, b, c, d, e); }
@@ -351,8 +351,8 @@ extern "C" BOOL   __stdcall Shim_SetWaitableTimer(HANDLE h, const LARGE_INTEGER*
 // ===========================================================================
 // Thread pool / timer queue / wait registration (12)
 // ===========================================================================
-extern "C" PTP_WAIT __stdcall Shim_CreateThreadpoolWait(PTP_WAIT_CALLBACK a, PVOID b, PVOID c)        { return ::CreateThreadpoolWait(a, b, c); }
-extern "C" VOID     __stdcall Shim_SetThreadpoolWait(PTP_WAIT a, HANDLE b, PVOID c)                   { ::SetThreadpoolWait(a, b, c); }
+extern "C" PTP_WAIT __stdcall Shim_CreateThreadpoolWait(PTP_WAIT_CALLBACK a, PVOID b, PVOID c)        { return ::CreateThreadpoolWait(a, b, reinterpret_cast<PTP_CALLBACK_ENVIRON>(c)); }
+extern "C" VOID     __stdcall Shim_SetThreadpoolWait(PTP_WAIT a, HANDLE b, PVOID c)                   { ::SetThreadpoolWait(a, b, reinterpret_cast<PFILETIME>(c)); }
 extern "C" VOID     __stdcall Shim_WaitForThreadpoolWaitCallbacks(PTP_WAIT a, BOOL b)                 { ::WaitForThreadpoolWaitCallbacks(a, b); }
 extern "C" VOID     __stdcall Shim_CloseThreadpoolWait(PTP_WAIT a)                                    { ::CloseThreadpoolWait(a); }
 extern "C" HANDLE   __stdcall Shim_CreateTimerQueue()                                                 { return ::CreateTimerQueue(); }
@@ -383,7 +383,7 @@ extern "C" SIZE_T __stdcall Shim_HeapSize(HANDLE a, DWORD b, LPCVOID c)         
 // Global / Local (6)
 // ===========================================================================
 extern "C" LPVOID __stdcall Shim_GlobalAlloc(UINT f, SIZE_T s)    { return ::GlobalAlloc(f, s); }
-extern "C" BOOL   __stdcall Shim_GlobalFree(HGLOBAL h)            { return ::GlobalFree(h); }
+extern "C" HGLOBAL __stdcall Shim_GlobalFree(HGLOBAL h)            { return ::GlobalFree(h); }
 extern "C" LPVOID __stdcall Shim_GlobalLock(HGLOBAL h)            { return ::GlobalLock(h); }
 extern "C" BOOL   __stdcall Shim_GlobalUnlock(HGLOBAL h)          { return ::GlobalUnlock(h); }
 extern "C" HLOCAL __stdcall Shim_LocalAlloc(UINT f, SIZE_T s)     { return ::LocalAlloc(f, s); }
@@ -465,18 +465,18 @@ extern "C" int    __stdcall Shim_GetGeoInfoW(GEOID g, GEOTYPE t, LPWSTR b, int n
 extern "C" GEOID  __stdcall Shim_GetUserGeoID(GEOTYPE t)               { return ::GetUserGeoID(t); }
 extern "C" int    __stdcall Shim_CompareStringA(LCID l, DWORD f, LPCSTR a, int na, LPCSTR b, int nb) { return ::CompareStringA(l, f, a, na, b, nb); }
 extern "C" int    __stdcall Shim_CompareStringW(LCID l, DWORD f, LPCWSTR a, int na, LPCWSTR b, int nb) { return ::CompareStringW(l, f, a, na, b, nb); }
-extern "C" int    __stdcall Shim_CompareStringEx(LPCWSTR n, DWORD f, LPCWSTR a, int na, LPCWSTR b, int nb, LPNLSVERINFO v, LPVOID p, LPARAM l) { return ::CompareStringEx(n, f, a, na, b, nb, v, p, l); }
+extern "C" int    __stdcall Shim_CompareStringEx(LPCWSTR n, DWORD f, LPCWSTR a, int na, LPCWSTR b, int nb, LPNLSVERSIONINFOEX v, LPVOID p, LPARAM l) { return ::CompareStringEx(n, f, a, na, b, nb, v, p, l); }
 extern "C" int    __stdcall Shim_CompareStringOrdinal(LPCWSTR a, int na, LPCWSTR b, int nb, BOOL i)   { return ::CompareStringOrdinal(a, na, b, nb, i); }
 extern "C" int    __stdcall Shim_LCMapStringW(LCID l, DWORD f, LPCWSTR s, int ns, LPWSTR d, int nd)    { return ::LCMapStringW(l, f, s, ns, d, nd); }
-extern "C" int    __stdcall Shim_LCMapStringEx(LPCWSTR n, DWORD f, LPCWSTR s, int ns, LPWSTR d, int nd, LPNLSVERINFO v, LPVOID p, LPARAM l) { return ::LCMapStringEx(n, f, s, ns, d, nd, v, p, l); }
+extern "C" int    __stdcall Shim_LCMapStringEx(LPCWSTR n, DWORD f, LPCWSTR s, int ns, LPWSTR d, int nd, LPNLSVERSIONINFOEX v, LPVOID p, LPARAM l) { return ::LCMapStringEx(n, f, s, ns, d, nd, v, p, l); }
 extern "C" int    __stdcall Shim_GetDateFormatW(LCID l, DWORD f, const SYSTEMTIME* t, LPCWSTR fmt, LPWSTR d, int nd) { return ::GetDateFormatW(l, f, t, fmt, d, nd); }
 extern "C" int    __stdcall Shim_GetDateFormatEx(LPCWSTR n, DWORD f, const SYSTEMTIME* t, LPCWSTR fmt, LPWSTR d, int nd, LPCWSTR cal) { return ::GetDateFormatEx(n, f, t, fmt, d, nd, cal); }
 extern "C" int    __stdcall Shim_GetTimeFormatW(LCID l, DWORD f, const SYSTEMTIME* t, LPCWSTR fmt, LPWSTR d, int nd) { return ::GetTimeFormatW(l, f, t, fmt, d, nd); }
 extern "C" int    __stdcall Shim_GetTimeFormatEx(LPCWSTR n, DWORD f, const SYSTEMTIME* t, LPCWSTR fmt, LPWSTR d, int nd) { return ::GetTimeFormatEx(n, f, t, fmt, d, nd); }
-extern "C" int    __stdcall Shim_GetCurrencyFormatEx(LPCWSTR n, DWORD f, const CURRENCYFMTW* fmt, LPCWSTR s, LPWSTR d, int nd) { return ::GetCurrencyFormatEx(n, f, fmt, s, d, nd); }
-extern "C" int    __stdcall Shim_GetNumberFormatEx(LPCWSTR n, DWORD f, const NUMBERFMTW* fmt, LPCWSTR s, LPWSTR d, int nd) { return ::GetNumberFormatEx(n, f, fmt, s, d, nd); }
+extern "C" int    __stdcall Shim_GetCurrencyFormatEx(LPCWSTR n, DWORD f, LPCWSTR s, const CURRENCYFMTW* fmt, LPWSTR d, int nd) { return ::GetCurrencyFormatEx(n, f, s, fmt, d, nd); }
+extern "C" int    __stdcall Shim_GetNumberFormatEx(LPCWSTR n, DWORD f, LPCWSTR s, const NUMBERFMTW* fmt, LPWSTR d, int nd) { return ::GetNumberFormatEx(n, f, s, fmt, d, nd); }
 extern "C" BOOL   __stdcall Shim_GetStringTypeW(DWORD t, LPCWSTR s, int n, LPWORD c) { return ::GetStringTypeW(t, s, n, c); }
-extern "C" BOOL   __stdcall Shim_GetUserPreferredUILanguages(DWORD f, PBOOL e, PZZWSTR b, PULONG n) { return ::GetUserPreferredUILanguages(f, e, b, n); }
+extern "C" BOOL   __stdcall Shim_GetUserPreferredUILanguages(DWORD f, PULONG e, PZZWSTR b, PULONG n) { return ::GetUserPreferredUILanguages(f, e, b, n); }
 
 // ===========================================================================
 // Time / date / version
@@ -496,7 +496,7 @@ extern "C" BOOL  __stdcall Shim_DosDateTimeToFileTime(WORD d, WORD t, LPFILETIME
 extern "C" LONG  __stdcall Shim_CompareFileTime(const FILETIME* a, const FILETIME* b) { return ::CompareFileTime(a, b); }
 extern "C" BOOL  __stdcall Shim_QueryUnbiasedInterruptTime(PULONGLONG t)             { return ::QueryUnbiasedInterruptTime(t); }
 extern "C" DWORD __stdcall Shim_GetVersion()                                          { return ::GetVersion(); }
-extern "C" BOOL  __stdcall Shim_GetVersionExW(LPOSVERSIONINFOEXW i)                  { return ::GetVersionExW(i); }
+extern "C" BOOL  __stdcall Shim_GetVersionExW(LPOSVERSIONINFOEXW i)                  { return ::GetVersionExW(reinterpret_cast<LPOSVERSIONINFOW>(i)); }
 extern "C" BOOL  __stdcall Shim_VerifyVersionInfoW(LPOSVERSIONINFOEXW i, DWORD t, DWORDLONG c) { return ::VerifyVersionInfoW(i, t, c); }
 extern "C" DWORDLONG __stdcall Shim_VerSetConditionMask(DWORDLONG m, DWORD t, BYTE c) { return ::VerSetConditionMask(m, t, c); }
 

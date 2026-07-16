@@ -54,7 +54,11 @@ struct XWR_sockaddr_in {
 }
 
 extern "C" int __stdcall Shim_WSAStartup(WORD wVersionRequested, void* lpWSAData) {
+#ifdef _MSC_VER
+    return ::WSAStartup(wVersionRequested, (LPWSADATA)lpWSAData);
+#else
     return ::WSAStartup(wVersionRequested, lpWSAData);
+#endif
 }
 extern "C" int __stdcall Shim_WSACleanup() { return ::WSACleanup(); }
 extern "C" SOCKET __stdcall Shim_socket(int af, int type, int protocol) {
@@ -74,14 +78,26 @@ extern "C" int __stdcall Shim_bind(SOCKET s, const void* name, int namelen) {
         ::WSASetLastError(WSAEACCES);
         return SOCKET_ERROR;
     }
+#ifdef _MSC_VER
+    return ::bind(s, (const sockaddr*)name, namelen);
+#else
     return ::bind(s, name, namelen);
+#endif
 }
 extern "C" int __stdcall Shim_listen(SOCKET s, int backlog) { return ::listen(s, backlog); }
 extern "C" SOCKET __stdcall Shim_accept(SOCKET s, void* addr, int* addrlen) {
+#ifdef _MSC_VER
+    return ::accept(s, (sockaddr*)addr, addrlen);
+#else
     return ::accept(s, addr, addrlen);
+#endif
 }
 extern "C" int __stdcall Shim_connect(SOCKET s, const void* name, int namelen) {
+#ifdef _MSC_VER
+    return ::connect(s, (const sockaddr*)name, namelen);
+#else
     return ::connect(s, name, namelen);
+#endif
 }
 extern "C" int __stdcall Shim_send(SOCKET s, const char* buf, int len, int flags) {
     return ::send(s, buf, len, flags);

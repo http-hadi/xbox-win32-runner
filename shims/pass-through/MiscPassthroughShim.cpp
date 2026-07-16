@@ -30,7 +30,12 @@ namespace xwr {
 // ---------------------------------------------------------------------------
 extern "C" HRESULT __stdcall Shim_D2D1CreateFactory(int factoryType, const IID& riid,
                                                      const void* pFactoryOptions, void** ppIFactory) {
+#ifdef _MSC_VER
+    return ::D2D1CreateFactory((D2D1_FACTORY_TYPE)factoryType, riid,
+                               (const D2D1_FACTORY_OPTIONS*)pFactoryOptions, ppIFactory);
+#else
     return ::D2D1CreateFactory(factoryType, riid, pFactoryOptions, ppIFactory);
+#endif
 }
 
 // ---------------------------------------------------------------------------
@@ -38,14 +43,34 @@ extern "C" HRESULT __stdcall Shim_D2D1CreateFactory(int factoryType, const IID& 
 // ---------------------------------------------------------------------------
 extern "C" HRESULT __stdcall Shim_DWriteCreateFactory(int factoryType, const IID& iid,
                                                        IUnknown** factory) {
+#ifdef _MSC_VER
+    return ::DWriteCreateFactory((DWRITE_FACTORY_TYPE)factoryType, iid, factory);
+#else
     return ::DWriteCreateFactory(factoryType, iid, factory);
+#endif
 }
 
 // ---------------------------------------------------------------------------
 // windowscodecs (WIC)
 // ---------------------------------------------------------------------------
 extern "C" HRESULT __stdcall Shim_WICCreateImagingFactory(UINT SDKVersion, IWICImagingFactory** ppIImagingFactory) {
-    return ::WICCreateImagingFactory(SDKVersion, ppIImagingFactory);
+    // WICCreateImagingFactory is not exported by name in the modern Windows SDK;
+    // create the factory via CoCreateInstance with CLSID_WICImagingFactory instead.
+    (void)SDKVersion;
+    if (!ppIImagingFactory) return E_POINTER;
+    *ppIImagingFactory = nullptr;
+#ifdef _MSC_VER
+    return CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER,
+                            IID_PPV_ARGS(ppIImagingFactory));
+#else
+    // Linux stub: declare the GUIDs locally — they're not in the stub header.
+    static const GUID _xwr_CLSID_WICImagingFactory = {
+        0xcaf5f5fa, 0x7a11, 0x4b9c, {0x8a, 0x05, 0x66, 0x7d, 0xfe, 0xb3, 0xa9, 0x7c}};
+    static const GUID _xwr_IID_IWICImagingFactory = {
+        0xec5ec8a9, 0xc395, 0x4314, {0x9c, 0x77, 0x54, 0xd7, 0xa9, 0x35, 0xa7, 0xad}};
+    return CoCreateInstance(_xwr_CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER,
+                            _xwr_IID_IWICImagingFactory, (void**)ppIImagingFactory);
+#endif
 }
 extern "C" HRESULT __stdcall Shim_WICConvertBitmapSource(const GUID& dstFormat,
                                                           IWICBitmapSource* pISrc,
