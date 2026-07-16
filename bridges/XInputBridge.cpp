@@ -19,7 +19,7 @@
 #include <winrt/Windows.Gaming.Input.h>
 #include <winrt/Windows.Foundation.Collections.h>
 #include <winrt/base.h>
-#pragma comment(lib, "Windows.Gaming.Input.lib")
+// WinRT lib not needed - CppWinRT handles linking
 #endif
 
 namespace xwr {
