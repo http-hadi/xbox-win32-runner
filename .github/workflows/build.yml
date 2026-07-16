@@ -119,6 +119,35 @@ jobs:
           name: build-debug-log
           path: uwp-shell/build_debug.log
 
+      - name: Build runtime test
+        shell: pwsh
+        run: |
+          cd ${{ github.workspace }}
+          # Compile the runtime test as a console app (links against real Win32, not UWP)
+          # This tests which APIs actually WORK at runtime, not just compile
+          cl /std:c++17 /EHsc /Fe:runtime_test.exe test\runtime_test.cpp /I shims /I winheaders /include:shims\CommonPre.h /D_MSC_VER /link kernel32.lib user32.lib advapi32.lib d3d11.lib dxgi.lib xinput.lib ws2_32.lib winmm.lib ole32.lib
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "Failed to compile runtime test"
+            exit 1
+          }
+          Write-Host "Runtime test compiled successfully"
+
+      - name: Run runtime test
+        shell: pwsh
+        run: |
+          cd ${{ github.workspace }}
+          .\runtime_test.exe 2>&1 | Tee-Object -FilePath runtime_test_output.txt
+          Write-Host "Runtime test exit code: $LASTEXITCODE"
+
+      - name: Upload runtime test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: runtime-test-results
+          path: |
+            runtime_test_output.txt
+            runtime_test_results.txt
+
       - name: Upload appx on success
         if: success()
         uses: actions/upload-artifact@v4
