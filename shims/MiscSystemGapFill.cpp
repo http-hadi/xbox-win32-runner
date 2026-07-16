@@ -45,9 +45,16 @@
 
 // ---------------------------------------------------------------------------
 // MSVC: pull in the SDK headers that <windows.h> does NOT include by default.
-//   * <setupapi.h>  — HDEVINFO, PSP_DEVINFO_DATA, PSP_DEVICE_INTERFACE_DATA
-//   * <cfgmgr32.h>  — DEVINST, CONFIGRET, device-manager APIs
-//   * <mmsystem.h>  — HWAVEIN/HWAVEOUT/LPWAVEHDR/HMIXER/HMIXEROBJ/LPMIXER*/LPMMTIME
+//   * <setupapi.h>          — HDEVINFO, PSP_DEVINFO_DATA, PSP_DEVICE_INTERFACE_DATA
+//   * <cfgmgr32.h>          — DEVINST, CONFIGRET, device-manager APIs
+//   * <mmsystem.h>          — HWAVEIN/HWAVEOUT/LPWAVEHDR/HMIXER/HMIXEROBJ/LPMIXER*/LPMMTIME
+//   * <d3d12.h>             — D3D12_VERSIONED_ROOT_SIGNATURE_DESC, ID3DBlob, D3D12SerializeVersionedRootSignature
+//   * <mfobjects.h>         — IMFAsyncCallback, IUnknown (MF surface)
+//   * <winhttp.h>           — HINTERNET, WINHTTP_PROXY_INFO, URL_COMPONENTS (note: WINHTTP_CURRENT_USER_IE_PROXY_CONFIG is gated behind WINAPI_PARTITION_DESKTOP and is NOT available to UWP AppContainer builds — see the forward-declaration below)
+//   * <wininet.h>           — INTERNET_PORT, INTERNET_SCHEME (wininet stubs)
+//   * <dwmapi.h>            — DwmFlush, DwmGetCompositionTimingInfo, DwmIsCompositionEnabled, DwmSetWindowAttribute, DWM_TIMING_INFO
+//   * <dbghelp.h>           — LPSTACKFRAME64, PREAD_PROCESS_MEMORY_ROUTINE64, PFUNCTION_TABLE_ACCESS_ROUTINE64, PGET_MODULE_BASE_ROUTINE64, PTRANSLATE_ADDRESS_ROUTINE64, MiniDumpWriteDump, StackWalk64, Sym* family
+//   * <uiautomationcore.h>  — PROPERTYID, UiaRaiseAutomationPropertyChangedEvent, UiaClientsAreListening
 // ---------------------------------------------------------------------------
 #ifdef _MSC_VER
   #include <setupapi.h>
@@ -57,12 +64,18 @@
   #include <mfobjects.h>
   #include <winhttp.h>
   #include <wininet.h>
+  #include <dwmapi.h>
+  #include <dbghelp.h>
+  #include <uiautomationcore.h>
   #pragma comment(lib, "setupapi.lib")
   #pragma comment(lib, "cfgmgr32.lib")
   #pragma comment(lib, "winmm.lib")
   #pragma comment(lib, "d3d12.lib")
   #pragma comment(lib, "winhttp.lib")
   #pragma comment(lib, "wininet.lib")
+  #pragma comment(lib, "dwmapi.lib")
+  #pragma comment(lib, "dbghelp.lib")
+  #pragma comment(lib, "uiautomationcore.lib")
 #endif
 
 #include <cstring>
@@ -90,6 +103,44 @@
 #endif
 #ifndef _XWR_DSERR_NODRIVER_CUST
 #define _XWR_DSERR_NODRIVER_CUST
+#endif
+
+// ---------------------------------------------------------------------------
+// MSVC / UWP fallbacks for types & constants the SDK headers gate behind
+// WINAPI_PARTITION_DESKTOP (and therefore exclude from AppContainer builds).
+// On Linux the stub winheaders/Windows.h already declares all of these
+// unconditionally, so the guards below are no-ops there.
+// ---------------------------------------------------------------------------
+
+// STATUS_NOT_IMPLEMENTED — used by the NtWriteFile / RtlUTF8ToUnicodeN stubs.
+// ntstatus.h is NOT pulled in by <windows.h>; define locally if missing.
+#ifndef STATUS_NOT_IMPLEMENTED
+#define STATUS_NOT_IMPLEMENTED ((NTSTATUS)0xC0000002L)
+#endif
+
+#ifdef _MSC_VER
+  // winhttp.h gates WINHTTP_CURRENT_USER_IE_PROXY_CONFIG (and the corresponding
+  // WinHttpGetIEProxyConfigForCurrentUser function) behind
+  // WINAPI_PARTITION_DESKTOP. UWP AppContainer builds therefore do NOT see the
+  // type even though <winhttp.h> is included above. Forward-declare the struct
+  // so the shim's function signature compiles; the body is stubbed on MSVC
+  // because the real function is also unavailable.
+  #ifndef _XWR_WINHTTP_IE_PROXY_DECLARED
+    struct _WINHTTP_CURRENT_USER_IE_PROXY_CONFIG;
+    typedef struct _WINHTTP_CURRENT_USER_IE_PROXY_CONFIG WINHTTP_CURRENT_USER_IE_PROXY_CONFIG;
+    typedef WINHTTP_CURRENT_USER_IE_PROXY_CONFIG* LPWINHTTP_CURRENT_USER_IE_PROXY_CONFIG;
+    #define _XWR_WINHTTP_IE_PROXY_DECLARED
+  #endif
+
+  // PRTL_RUN_ONCE_INIT_FN is declared inside an NTDDI_VERSION >= NTDDI_WIN7
+  // block in winnt.h but is occasionally missing from UWP SDK partitions.
+  // Provide a fallback typedef if the SDK did not declare it. C++11 allows
+  // typedef redeclaration to the same type, so this is harmless if winnt.h
+  // already provided it.
+  #ifndef _XWR_PRTL_RUN_ONCE_INIT_FN_DEFINED
+    typedef BOOLEAN (NTAPI *PRTL_RUN_ONCE_INIT_FN)(PRTL_RUN_ONCE, PVOID, PVOID*);
+    #define _XWR_PRTL_RUN_ONCE_INIT_FN_DEFINED
+  #endif
 #endif
 
 namespace xwr {
@@ -269,18 +320,19 @@ extern "C" HRESULT __stdcall Shim_D3D12CoreRegisterLayers(void* pLayers, UINT Nu
 extern "C" HRESULT __stdcall Shim_D3D12SerializeVersionedRootSignature(const void* pRootSignature,
                                                                        void** ppBlob, void** ppErrorBlob,
                                                                        UINT Flags) {
-    // Real signature: (const D3D12_VERSIONED_ROOT_SIGNATURE_DESC*, ID3DBlob**, ID3DBlob**, UINT).
-    // The shim exposes a void*/void** ABI for the loader's IAT. Cast through
-    // the public types so MSVC accepts the call. The Linux stub declares only
-    // the 3-arg form.
+    // Real signature (current Windows SDK): 3-arg form
+    //   (const D3D12_VERSIONED_ROOT_SIGNATURE_DESC*, ID3DBlob**, ID3DBlob**).
+    // The legacy 4-arg form (with a UINT Flags tail) was removed; the SDK now
+    // always passes 0 internally. The shim still accepts a 4th arg from the
+    // game's IAT for ABI compatibility with older binaries, but ignores it.
+    // The Linux stub also declares only the 3-arg form.
+    (void)Flags;
 #ifdef _MSC_VER
     return ::D3D12SerializeVersionedRootSignature(
         reinterpret_cast<const D3D12_VERSIONED_ROOT_SIGNATURE_DESC*>(pRootSignature),
         reinterpret_cast<ID3DBlob**>(ppBlob),
-        reinterpret_cast<ID3DBlob**>(ppErrorBlob),
-        Flags);
+        reinterpret_cast<ID3DBlob**>(ppErrorBlob));
 #else
-    (void)Flags;
     return ::D3D12SerializeVersionedRootSignature(pRootSignature, ppBlob, ppErrorBlob);
 #endif
 }
@@ -397,7 +449,18 @@ extern "C" BOOL __stdcall Shim_WinHttpGetDefaultProxyConfiguration(LPWINHTTP_PRO
     return ::WinHttpGetDefaultProxyConfiguration(pProxyInfo);
 }
 extern "C" BOOL __stdcall Shim_WinHttpGetIEProxyConfigForCurrentUser(LPWINHTTP_CURRENT_USER_IE_PROXY_CONFIG pProxyConfig) {
+    // UWP AppContainer builds cannot read IE proxy settings: <winhttp.h> gates
+    // both WINHTTP_CURRENT_USER_IE_PROXY_CONFIG and WinHttpGetIEProxyConfigForCurrentUser
+    // behind WINAPI_PARTITION_DESKTOP, so neither the type nor the function is
+    // visible to the compiler. The type is forward-declared above (so the
+    // signature compiles), but the function call is only emitted on Linux.
+#ifdef _MSC_VER
+    (void)pProxyConfig;
+    ::SetLastError(ERROR_NOT_SUPPORTED);
+    return FALSE;
+#else
     return ::WinHttpGetIEProxyConfigForCurrentUser(pProxyConfig);
+#endif
 }
 extern "C" HINTERNET __stdcall Shim_WinHttpOpen(LPCWSTR pszAgentW, DWORD dwAccessType,
                                                 LPCWSTR pszProxyW, LPCWSTR pszProxyBypassW,
@@ -485,13 +548,29 @@ extern "C" void* __stdcall Shim_WTHelperProvDataFromStateData(void* hStateData) 
 // ===========================================================================
 extern "C" NTSTATUS __stdcall Shim_NtSetInformationThread(HANDLE hThread, ULONG ThreadInformationClass,
                                                           PVOID ThreadInformation, ULONG ThreadInformationLength) {
+    // MSVC's <winternl.h> declares NtSetInformationThread with a THREADINFOCLASS
+    // enum as the 2nd argument; the shim accepts a bare ULONG for IAT ABI.
+    // Cast through the enum on MSVC; the Linux stub takes ULONG directly.
+#ifdef _MSC_VER
+    return ::NtSetInformationThread(hThread, (THREADINFOCLASS)ThreadInformationClass,
+                                    ThreadInformation, ThreadInformationLength);
+#else
     return ::NtSetInformationThread(hThread, ThreadInformationClass, ThreadInformation, ThreadInformationLength);
+#endif
 }
 extern "C" NTSTATUS __stdcall Shim_NtWriteFile(HANDLE FileHandle, HANDLE Event, PIO_APC_ROUTINE ApcRoutine,
                                                PVOID ApcContext, PIO_STATUS_BLOCK IoStatusBlock,
                                                PVOID Buffer, ULONG Length, PLARGE_INTEGER ByteOffset,
                                                PULONG Key) {
+    // NtWriteFile is NOT declared in UWP's <winternl.h> (only a subset of the
+    // Nt* surface is exposed to AppContainer builds). Stub it.
+#ifdef _MSC_VER
+    (void)FileHandle; (void)Event; (void)ApcRoutine; (void)ApcContext;
+    (void)IoStatusBlock; (void)Buffer; (void)Length; (void)ByteOffset; (void)Key;
+    return STATUS_NOT_IMPLEMENTED;
+#else
     return ::NtWriteFile(FileHandle, Event, ApcRoutine, ApcContext, IoStatusBlock, Buffer, Length, ByteOffset, Key);
+#endif
 }
 extern "C" VOID    __stdcall Shim_RtlCaptureContext(PCONTEXT ContextRecord) {
     ::RtlCaptureContext(ContextRecord);
@@ -500,7 +579,13 @@ extern "C" VOID    __stdcall Shim_RtlInitUnicodeString(PUNICODE_STRING Destinati
     ::RtlInitUnicodeString(DestinationString, SourceString);
 }
 extern "C" BOOLEAN __stdcall Shim_RtlIsCriticalSectionLockedByThread(PRTL_CRITICAL_SECTION CriticalSection) {
+    // RtlIsCriticalSectionLockedByThread is NOT declared in UWP's SDK headers.
+#ifdef _MSC_VER
+    (void)CriticalSection;
+    return FALSE;
+#else
     return ::RtlIsCriticalSectionLockedByThread(CriticalSection);
+#endif
 }
 extern "C" PVOID   __stdcall Shim_RtlLookupFunctionEntry(DWORD64 ControlPc, PDWORD64 ImageBase,
                                                         PUNWIND_HISTORY_TABLE HistoryTable) {
@@ -514,7 +599,21 @@ extern "C" PVOID   __stdcall Shim_RtlPcToFileHeader(PVOID PcValue, PVOID* BaseOf
 }
 extern "C" BOOLEAN __stdcall Shim_RtlRunOnceExecuteOnce(PRTL_RUN_ONCE RunOnce, PRTL_RUN_ONCE_INIT_FN InitFn,
                                                         PVOID Context, PVOID* Parameter) {
+    // RtlRunOnceExecuteOnce is NOT declared in UWP's SDK. Use the kernel32
+    // wrapper InitOnceExecuteOnce, which has the same one-time-init semantics.
+    // PRTL_RUN_ONCE and PINIT_ONCE are layout-compatible (both are a single
+    // PVOID field); PRTL_RUN_ONCE_INIT_FN and PINIT_ONCE_FN differ only in
+    // return type (BOOLEAN vs BOOL — both widened to EAX on x86/x64), so a
+    // reinterpret_cast bridges them.
+#ifdef _MSC_VER
+    BOOL ok = ::InitOnceExecuteOnce(reinterpret_cast<PINIT_ONCE>(RunOnce),
+                                    reinterpret_cast<PINIT_ONCE_FN>(InitFn),
+                                    Context,
+                                    reinterpret_cast<LPVOID*>(Parameter));
+    return ok ? TRUE : FALSE;
+#else
     return ::RtlRunOnceExecuteOnce(RunOnce, InitFn, Context, Parameter);
+#endif
 }
 extern "C" VOID    __stdcall Shim_RtlUnwind(PVOID TargetFrame, PVOID TargetIp, PEXCEPTION_RECORD ExceptionRecord,
                                             PVOID ReturnValue) {
@@ -529,8 +628,15 @@ extern "C" NTSTATUS __stdcall Shim_RtlUTF8ToUnicodeN(PWSTR UnicodeStringDestinat
                                                     ULONG UnicodeStringMaxByteCount,
                                                     PULONG UnicodeStringActualByteCount,
                                                     PCSTR UTF8StringSource, ULONG UTF8StringByteCount) {
+    // RtlUTF8ToUnicodeN is NOT declared in UWP's SDK headers.
+#ifdef _MSC_VER
+    (void)UnicodeStringDestination; (void)UnicodeStringMaxByteCount;
+    (void)UnicodeStringActualByteCount; (void)UTF8StringSource; (void)UTF8StringByteCount;
+    return STATUS_NOT_IMPLEMENTED;
+#else
     return ::RtlUTF8ToUnicodeN(UnicodeStringDestination, UnicodeStringMaxByteCount,
                                UnicodeStringActualByteCount, UTF8StringSource, UTF8StringByteCount);
+#endif
 }
 extern "C" PEXCEPTION_ROUTINE __stdcall Shim_RtlVirtualUnwind(DWORD HandlerType, DWORD64 ImageBase, DWORD64 ControlPc,
                                                    PIMAGE_RUNTIME_FUNCTION_ENTRY FunctionEntry, PCONTEXT ContextRecord,
