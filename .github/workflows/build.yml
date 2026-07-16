@@ -76,8 +76,8 @@ jobs:
       - name: Generate properly-sized PNG assets
         shell: pwsh
         run: |
-          cd ${{ github.workspace }}\uwp-shell\Assets
-          # Use .NET System.Drawing to create properly-sized PNGs
+          $assetsDir = "${{ github.workspace }}\uwp-shell\Assets"
+          if (!(Test-Path $assetsDir)) { New-Item -ItemType Directory -Path $assetsDir -Force }
           Add-Type -AssemblyName System.Drawing
           $sizes = @{
             "Square150x150Logo.png" = @(150, 150)
@@ -90,13 +90,16 @@ jobs:
           foreach ($name in $sizes.Keys) {
             $w = $sizes[$name][0]
             $h = $sizes[$name][1]
+            $path = Join-Path $assetsDir $name
             $bmp = New-Object System.Drawing.Bitmap($w, $h)
             $g = [System.Drawing.Graphics]::FromImage($bmp)
             $g.Clear([System.Drawing.Color]::Black)
-            $bmp.Save($name, [System.Drawing.Imaging.ImageFormat]::Png)
+            $bmp.Save($path, [System.Drawing.Imaging.ImageFormat]::Png)
             $g.Dispose()
             $bmp.Dispose()
-            Write-Host "Created $name ($w x $h)"
+            $info = [System.Drawing.Image]::FromFile($path)
+            Write-Host "Created $name ($w x $h) — actual: $($info.Width) x $($info.Height)"
+            $info.Dispose()
           }
 
       - name: Build (Debug x64)
