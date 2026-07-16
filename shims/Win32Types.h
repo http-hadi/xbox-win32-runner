@@ -2021,19 +2021,16 @@
 #define _WINSOCK_DEPRECATED_NO_WARNINGS
 #endif
 
-// ----------------------------------------------------------------------------
-// Property key struct (used by some shell32 paths)
-// ----------------------------------------------------------------------------
-// The real SDK may guard this with _PROPERTYKEY_DEFINED (wtypes.h) or
-// _TAGPROPERTYKEY_DEFINED (some older SDKs / fwddecl). Use BOTH guards so we
-// never collide with the SDK's own definition (C2011 redefinition errors).
-#if !defined(_PROPERTYKEY_DEFINED) && !defined(_TAGPROPERTYKEY_DEFINED)
+// Property key struct — ONLY define on Linux (MSVC gets it from the SDK's
+// <propkeydef.h> / <wtypes.h>). Defining it on MSVC causes C2011 redefinition.
+#ifndef XWR_PROPERTYKEY_DEFINED
+#define XWR_PROPERTYKEY_DEFINED
+#if !defined(_MSC_VER)
 typedef struct _tagpropertykey {
     GUID fmtid;
     DWORD pid;
 } PROPERTYKEY;
-#define _PROPERTYKEY_DEFINED
-#define _TAGPROPERTYKEY_DEFINED
+#endif
 #endif
 
 // ----------------------------------------------------------------------------
