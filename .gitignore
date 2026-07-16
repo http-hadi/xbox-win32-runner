@@ -29,3 +29,4 @@ AppPackages/
 .vs/
 __pycache__/
 *.pyc
+uwp-shell/Assets/*.png
