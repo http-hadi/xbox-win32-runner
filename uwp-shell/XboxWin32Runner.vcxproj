@@ -20,10 +20,13 @@
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectGuid>{00000000-0000-0000-0000-000000000001}</ProjectGuid>
-    <Keyword>Win32Proj</Keyword>
+    <Keyword>WindowsRuntimeApp</Keyword>
     <RootNamespace>XboxWin32Runner</RootNamespace>
     <DefaultLanguage>en-US</DefaultLanguage>
     <MinimumVisualStudioVersion>14.0</MinimumVisualStudioVersion>
+    <AppContainerApplication>true</AppContainerApplication>
+    <ApplicationType>Windows Store</ApplicationType>
+    <ApplicationTypeRevision>10.0</ApplicationTypeRevision>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
     <WindowsTargetPlatformMinVersion>10.0.22621.0</WindowsTargetPlatformMinVersion>
   </PropertyGroup>
@@ -66,8 +69,10 @@
     </Link>
   </ItemDefinitionGroup>
   <PropertyGroup>
-    <AppxPackage>false</AppxPackage>
-    <GenerateAppxPackageOnBuild>false</GenerateAppxPackageOnBuild>
+    <AppxPackage>true</AppxPackage>
+    <GenerateAppxPackageOnBuild>true</GenerateAppxPackageOnBuild>
+    <AppxAutoIncrementPackageRevision>True</AppxAutoIncrementPackageRevision>
+    <AppxBundle>Never</AppxBundle>
   </PropertyGroup>
   <ItemGroup>
     <!-- PeLoader -->
