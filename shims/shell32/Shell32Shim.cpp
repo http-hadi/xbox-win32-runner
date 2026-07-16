@@ -5,6 +5,16 @@
 
 #include "UwpSdkIncludes.h"
 
+// ---------------------------------------------------------------------------
+// MSVC: pull in <shlobj.h> for the CSIDL_* constants and SHGetFolderPathW.
+// <windows.h> includes shellapi.h but NOT shlobj.h by default.
+// ---------------------------------------------------------------------------
+#ifdef _MSC_VER
+  #include <shlobj.h>
+  #include <shlwapi.h>
+  #pragma comment(lib, "shell32.lib")
+  #pragma comment(lib, "shlwapi.lib")
+#endif
 
 #include <string>
 #include <vector>

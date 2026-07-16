@@ -11,6 +11,17 @@
 
 #include "UwpSdkIncludes.h"
 
+// ---------------------------------------------------------------------------
+// MSVC: <setupapi.h> is NOT pulled in by <windows.h> by default. The stub
+// functions below reference PSP_DEVINFO_DATA / PSP_DEVICE_INTERFACE_DATA, so
+// we need it here. Also pull in <cfgmgr32.h> for DEVINST.
+// ---------------------------------------------------------------------------
+#ifdef _MSC_VER
+  #include <setupapi.h>
+  #include <cfgmgr32.h>
+  #pragma comment(lib, "setupapi.lib")
+  #pragma comment(lib, "cfgmgr32.lib")
+#endif
 
 #include <atomic>
 

@@ -18,6 +18,17 @@
 
 #include "UwpSdkIncludes.h"
 
+// ---------------------------------------------------------------------------
+// MSVC: <windows.h> already brings in most of the kernel32 surface, but a
+// handful of file/IO declarations live in <fileapi.h> and the broader
+// <winbase.h>. Re-including them is idempotent (guarded) and makes the
+// dependency explicit for GetFileSize / MoveFileW / etc. used below.
+// ---------------------------------------------------------------------------
+#ifdef _MSC_VER
+  #include <fileapi.h>
+  #include <winbase.h>
+  #pragma comment(lib, "kernel32.lib")
+#endif
 
 #include <Windows.h>
 #include <atomic>

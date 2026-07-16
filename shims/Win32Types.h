@@ -2024,13 +2024,16 @@
 // ----------------------------------------------------------------------------
 // Property key struct (used by some shell32 paths)
 // ----------------------------------------------------------------------------
-// The real SDK uses _PROPERTYKEY_DEFINED as the guard. Our stub also needs it.
-#if !defined(_PROPERTYKEY_DEFINED)
+// The real SDK may guard this with _PROPERTYKEY_DEFINED (wtypes.h) or
+// _TAGPROPERTYKEY_DEFINED (some older SDKs / fwddecl). Use BOTH guards so we
+// never collide with the SDK's own definition (C2011 redefinition errors).
+#if !defined(_PROPERTYKEY_DEFINED) && !defined(_TAGPROPERTYKEY_DEFINED)
 typedef struct _tagpropertykey {
     GUID fmtid;
     DWORD pid;
 } PROPERTYKEY;
 #define _PROPERTYKEY_DEFINED
+#define _TAGPROPERTYKEY_DEFINED
 #endif
 
 // ----------------------------------------------------------------------------

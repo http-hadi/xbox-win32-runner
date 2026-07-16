@@ -54,6 +54,19 @@
 
 #include "UwpSdkIncludes.h"
 
+// ---------------------------------------------------------------------------
+// MSVC: pull in the SDK headers that declare the Crypt* / ETW / ACL surface
+// used by the gap-fill shims below.
+//   * <wincrypt.h>  — CryptAcquireContextW / CryptGenRandom / HCRYPTPROV
+//   * <evntprov.h>  — REGHANDLE / EventRegister / EventWrite / EventUnregister
+//   * <aclapi.h>    — SetEntriesInAclW / SetSecurityInfo (uses accctrl.h)
+// ---------------------------------------------------------------------------
+#ifdef _MSC_VER
+  #include <wincrypt.h>
+  #include <evntprov.h>
+  #include <aclapi.h>
+  #pragma comment(lib, "advapi32.lib")
+#endif
 
 #include <atomic>
 #include <mutex>

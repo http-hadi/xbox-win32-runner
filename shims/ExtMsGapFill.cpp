@@ -35,6 +35,20 @@
 
 #include "UwpSdkIncludes.h"
 
+// ---------------------------------------------------------------------------
+// MSVC: pull in the SDK headers that <windows.h> does NOT include by default.
+//   * <werapi.h>  — defines HREPORT + WER_REPORT_INFORMATION
+//   * <dxcore.h>  — declares DXCoreCreateAdapterFactory (may not be present on
+//                   every Windows SDK install; use __has_include to detect it)
+// ---------------------------------------------------------------------------
+#ifdef _MSC_VER
+  #include <werapi.h>
+  #if __has_include(<dxcore.h>)
+    #include <dxcore.h>
+    #pragma comment(lib, "dxcore.lib")
+    #define XWR_HAS_DXCORE 1
+  #endif
+#endif
 
 #include "ShimRegistry.h"
 
@@ -49,7 +63,7 @@
 // define it locally if missing so the WER shim signatures resolve.
 // On MSVC with <werapi.h> included, HREPORT is typedef'd there; the
 // _WERAPI_H_ guard (defined by werapi.h) ensures we don't re-typedef.
-#if !defined(HREPORT_DEFINED) && !defined(_WERAPI_H_)
+#if !defined(HREPORT_DEFINED) && !defined(_WERAPI_H_) && !defined(__WERAPI_H__)
 typedef HANDLE HREPORT, *PHREPORT;
 #define HREPORT_DEFINED
 #endif
@@ -92,7 +106,14 @@ extern "C" HRESULT __stdcall Shim_WerReportCloseHandle(HREPORT) {
 // ===========================================================================
 extern "C" HRESULT __stdcall Shim_DXCoreCreateAdapterFactory(const IID& riid, void** ppvFactory) {
 #ifndef XWR_SYNTAX_CHECK
+  #if defined(XWR_HAS_DXCORE)
     return ::DXCoreCreateAdapterFactory(riid, ppvFactory);
+  #else
+    // <dxcore.h> isn't available on this toolchain — fall back to a stub.
+    (void)riid;
+    if (ppvFactory) *ppvFactory = nullptr;
+    return E_NOTIMPL;
+  #endif
 #else
     (void)riid;
     if (ppvFactory) *ppvFactory = nullptr;

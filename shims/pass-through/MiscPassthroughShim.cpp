@@ -4,6 +4,22 @@
 
 #include "UwpSdkIncludes.h"
 
+// ---------------------------------------------------------------------------
+// MSVC: pull in the headers for the four factory families we forward to.
+// <windows.h> does NOT include d2d1.h / dwrite.h / wincodec.h by default;
+// wincrypt.h IS pulled in via the NOCRYPT-undef path, but re-including is
+// a no-op (idempotent) and makes the dependency explicit.
+// ---------------------------------------------------------------------------
+#ifdef _MSC_VER
+  #include <d2d1.h>
+  #include <dwrite.h>
+  #include <wincodec.h>
+  #include <wincrypt.h>
+  #pragma comment(lib, "d2d1.lib")
+  #pragma comment(lib, "dwrite.lib")
+  #pragma comment(lib, "windowscodecs.lib")
+  #pragma comment(lib, "advapi32.lib")
+#endif
 
 #include "../ShimRegistry.h"
 

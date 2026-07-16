@@ -22,6 +22,17 @@
 
 #include "UwpSdkIncludes.h"
 
+// ---------------------------------------------------------------------------
+// MSVC: <inspectable.h> declares IInspectable / IInspectable-producing
+// helpers used by the CppWinRT projection below. <windows.h> itself only
+// pulls in unknwn.h (IUnknown) and objbase.h; the inspectable.h header is
+// included indirectly by some SDK paths but not by <windows.h> directly,
+// so include it explicitly here to be safe.
+// ---------------------------------------------------------------------------
+#ifdef _MSC_VER
+  #include <inspectable.h>
+#endif
+
 
 #include "App.h"
 #include "PeLoader.h"

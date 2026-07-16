@@ -5,6 +5,21 @@
 // (they should be using the D3D11 bridge instead).
 
 #include "UwpSdkIncludes.h"
+
+// ---------------------------------------------------------------------------
+// MSVC: <windows.h> does NOT include <GL/gl.h> by default, and the Windows
+// SDK may or may not ship it depending on which optional components are
+// installed. Use __has_include to detect it. If unavailable, typedef the
+// minimal set of GL types this file references (HGLRC, GLubyte) locally —
+// they're already #ifndef-guarded further down so the redundant guards here
+// are a no-op.
+// ---------------------------------------------------------------------------
+#ifdef _MSC_VER
+  #if __has_include(<GL/gl.h>)
+    #include <GL/gl.h>
+  #endif
+#endif
+
 #include <atomic>
 
 #include "../ShimRegistry.h"

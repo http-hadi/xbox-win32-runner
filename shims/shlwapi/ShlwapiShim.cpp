@@ -4,6 +4,18 @@
 // color helpers.
 
 #include "UwpSdkIncludes.h"
+
+// ---------------------------------------------------------------------------
+// MSVC: <shlwapi.h> declares PathFileExistsW / PathRemoveFileSpecW /
+// PathAppendW / PathCombineW etc. <windows.h> does NOT include it by default
+// (only shellapi.h is pulled in). Link against shlwapi.lib for the
+// pass-through paths that call the real shlwapi implementation.
+// ---------------------------------------------------------------------------
+#ifdef _MSC_VER
+  #include <shlwapi.h>
+  #pragma comment(lib, "shlwapi.lib")
+#endif
+
 #include <string>
 #include <cwctype>
 #include <cstring>

@@ -43,6 +43,20 @@
 
 #include "UwpSdkIncludes.h"
 
+// ---------------------------------------------------------------------------
+// MSVC: pull in the SDK headers that <windows.h> does NOT include by default.
+//   * <setupapi.h>  — HDEVINFO, PSP_DEVINFO_DATA, PSP_DEVICE_INTERFACE_DATA
+//   * <cfgmgr32.h>  — DEVINST, CONFIGRET, device-manager APIs
+//   * <mmsystem.h>  — HWAVEIN/HWAVEOUT/LPWAVEHDR/HMIXER/HMIXEROBJ/LPMIXER*/LPMMTIME
+// ---------------------------------------------------------------------------
+#ifdef _MSC_VER
+  #include <setupapi.h>
+  #include <cfgmgr32.h>
+  #include <mmsystem.h>
+  #pragma comment(lib, "setupapi.lib")
+  #pragma comment(lib, "cfgmgr32.lib")
+  #pragma comment(lib, "winmm.lib")
+#endif
 
 #include <cstring>
 #include <cstdlib>

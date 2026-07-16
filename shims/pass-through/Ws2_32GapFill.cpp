@@ -31,6 +31,16 @@
 
 #include "UwpSdkIncludes.h"
 
+// ---------------------------------------------------------------------------
+// MSVC: winsock2.h + ws2tcpip.h MUST be visible here even if some other TU
+// earlier didn't include them. They declare the SOCKET type and the winsock
+// API signatures that the gap-fill shims below forward to.
+// ---------------------------------------------------------------------------
+#ifdef _MSC_VER
+  #include <winsock2.h>
+  #include <ws2tcpip.h>
+  #pragma comment(lib, "ws2_32.lib")
+#endif
 
 #include <cstdint>
 #include <cstring>
