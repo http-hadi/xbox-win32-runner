@@ -80,8 +80,7 @@ jobs:
           msbuild XboxWin32Runner.vcxproj /p:Configuration=Debug /p:Platform=x64 /m /v:minimal 2>&1 | Tee-Object -FilePath build_debug.log
           $exitCode = $LASTEXITCODE
           Write-Host "MSBuild exit code: $exitCode"
-          # Show the last 50 lines of build output for debugging
-          Get-Content build_debug.log -Tail 50
+          Get-Content build_debug.log -Tail 80
           exit $exitCode
 
       - name: Upload build log on failure
