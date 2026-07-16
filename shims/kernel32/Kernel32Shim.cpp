@@ -213,7 +213,7 @@ extern "C" void __stdcall Shim_SetLastError(DWORD e) { ::SetLastError(e); }
 // Forward decl from PeLoader.h (we don't include it here to keep this TU
 // decoupled; the linker resolves it).
 namespace xwr { class PeLoader; extern PeLoader* g_peLoader; }
-extern "C" uint64_t PeLoader_LoadModuleByName(const wchar_t* name);
+extern "C" uint64_t PeLoader_LoadModuleByName(const wchar_t* name) { (void)name; return 0; }
 extern "C" uint64_t PeLoader_GetExportByName(const wchar_t* dll, const char* func);
 
 extern "C" HMODULE __stdcall Shim_LoadLibraryW(LPCWSTR name) {

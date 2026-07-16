@@ -62,7 +62,7 @@
     <Link>
       <SubSystem>Windows</SubSystem>
       <GenerateWindowsMetadata>false</GenerateWindowsMetadata>
-      <AdditionalDependencies>kernel32.lib;user32.lib;gdi32.lib;advapi32.lib;shell32.lib;shlwapi.lib;ole32.lib;winmm.lib;version.lib;d3d11.lib;dxgi.lib;d2d1.lib;dwrite.lib;windowscodecs.lib;xinput.lib;xaudio2.lib;ws2_32.lib;crypt32.lib;bcrypt.lib;uuid.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>kernel32.lib;user32.lib;gdi32.lib;advapi32.lib;shell32.lib;shlwapi.lib;ole32.lib;oleaut32.lib;winmm.lib;version.lib;d3d11.lib;dxgi.lib;d2d1.lib;dwrite.lib;windowscodecs.lib;xinput.lib;xaudio2.lib;ws2_32.lib;crypt32.lib;bcrypt.lib;uuid.lib;onecoreuap.lib;runtimeobject.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <PropertyGroup>
