@@ -73,6 +73,28 @@ jobs:
           nuget restore XboxWin32Runner.sln 2>&1 | Out-Null
           Write-Host "NuGet restore complete"
 
+      - name: Remove WIN32_LEAN_AND_MEAN from all UWP/SDK build targets
+        shell: pwsh
+        run: |
+          # The UWP MSBuild targets define WIN32_LEAN_AND_MEAN which strips
+          # winuser.h, mmsystem.h, winsvc.h, shlobj.h, etc. from windows.h.
+          # We patch ALL .props and .targets files that reference it.
+          $files = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\build\" -Recurse -Include "*.props","*.targets" -ErrorAction SilentlyContinue
+          $patched = 0
+          foreach ($f in $files) {
+            $content = Get-Content $f.FullName -Raw -ErrorAction SilentlyContinue
+            if ($content -match 'WIN32_LEAN_AND_MEAN') {
+              $content = $content -replace 'WIN32_LEAN_AND_MEAN', 'WIN32_LEAN_AND_MEAN_DISABLED'
+              Set-Content $f.FullName -Value $content
+              $patched++
+              Write-Host "Patched: $($f.FullName)"
+            }
+          }
+          Write-Host "Total files patched: $patched"
+          if ($patched -eq 0) {
+            Write-Host "WARNING: No files containing WIN32_LEAN_AND_MEAN were found"
+          }
+
       - name: Build (Debug x64)
         shell: pwsh
         run: |
