@@ -1,0 +1,159 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Debug|Xbox">
+      <Configuration>Debug</Configuration>
+      <Platform>Xbox</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|Xbox">
+      <Configuration>Release</Configuration>
+      <Platform>Xbox</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <ProjectGuid>{00000000-0000-0000-0000-000000000001}</ProjectGuid>
+    <Keyword>WindowsRuntimeApp</Keyword>
+    <RootNamespace>XboxWin32Runner</RootNamespace>
+    <DefaultLanguage>en-US</DefaultLanguage>
+    <MinimumVisualStudioVersion>14.0</MinimumVisualStudioVersion>
+    <AppContainerApplication>true</AppContainerApplication>
+    <ApplicationType>Windows Store</ApplicationType>
+    <ApplicationTypeRevision>10.0</ApplicationTypeRevision>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+    <WindowsTargetPlatformMinVersion>10.0.22621.0</WindowsTargetPlatformMinVersion>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)'=='Debug'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)'=='Release'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <PlatformToolset>v143</PlatformToolset>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings" />
+  <ImportGroup Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <PropertyGroup Label="UserMacros" />
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <CompileAsWinRT>false</CompileAsWinRT>
+      <ForcedIncludeFiles>CommonPre.h</ForcedIncludeFiles>
+      <PreprocessorDefinitions>_UNICODE;UNICODE;WINRT_ENABLED;XWR_UWP_BUILD;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(ProjectDir);$(ProjectDir)..\pe-loader;$(ProjectDir)..\shims;$(ProjectDir)..\shims\kernel32;$(ProjectDir)..\shims\user32;$(ProjectDir)..\shims\gdi32;$(ProjectDir)..\shims\advapi32;$(ProjectDir)..\shims\shell32;$(ProjectDir)..\shims\shlwapi;$(ProjectDir)..\shims\ole32;$(ProjectDir)..\shims\winmm;$(ProjectDir)..\shims\version;$(ProjectDir)..\shims\pass-through;$(ProjectDir)..\shims\stubs;$(ProjectDir)..\shims\legacy;$(ProjectDir)..\d3d11-bridge;$(ProjectDir)..\bridges;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <DisableSpecificWarnings>4996;4505;4273;4005;4164;4229;4244;4267;4311;4302;4065;4189;4101;4456;4458;4702;4703;4706;4715;4459;4477;4820;4668;4061;4365;4774;4201;4324;4514;4625;4626;5026;5027;4623;4255;4371;4710;4820;4548;4191;4099;26812</DisableSpecificWarnings>
+      <TreatWarningAsError>false</TreatWarningAsError>
+      <WarningLevel>TurnOffAllWarnings</WarningLevel>
+    </ClCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <GenerateWindowsMetadata>false</GenerateWindowsMetadata>
+      <AdditionalDependencies>kernel32.lib;user32.lib;gdi32.lib;advapi32.lib;shell32.lib;shlwapi.lib;ole32.lib;winmm.lib;version.lib;d3d11.lib;dxgi.lib;d2d1.lib;dwrite.lib;windowscodecs.lib;xinput.lib;xaudio2.lib;ws2_32.lib;crypt32.lib;bcrypt.lib;uuid.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+  <PropertyGroup>
+    <AppxPackage>true</AppxPackage>
+    <GenerateAppxPackageOnBuild>true</GenerateAppxPackageOnBuild>
+    <AppxAutoIncrementPackageRevision>True</AppxAutoIncrementPackageRevision>
+    <AppxBundle>Never</AppxBundle>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- PeLoader -->
+    <ClCompile Include="..\pe-loader\PeLoader.cpp" />
+    <!-- Shim registry + CommonPre -->
+    <ClCompile Include="..\shims\ShimRegistry.cpp" />
+    <!-- API-set forwarder + VC runtime passthrough (Task ID GAP-APISETS-VCRT) -->
+    <ClCompile Include="..\shims\ApiSetForwarder.cpp" />
+    <ClCompile Include="..\shims\VcRuntimePassthrough.cpp" />
+    <!-- kernel32 -->
+    <ClCompile Include="..\shims\kernel32\Kernel32Shim.cpp" />
+    <ClCompile Include="..\shims\kernel32\PathTranslator.cpp" />
+    <ClCompile Include="..\shims\kernel32\Win32ToUwpTranslator.cpp" />
+    <!-- user32 / gdi32 / advapi32 / shell32 / shlwapi / ole32 / winmm / version -->
+    <ClCompile Include="..\shims\user32\User32Shim.cpp" />
+    <ClCompile Include="..\shims\gdi32\Gdi32Shim.cpp" />
+    <ClCompile Include="..\shims\advapi32\Advapi32Shim.cpp" />
+    <ClCompile Include="..\shims\shell32\Shell32Shim.cpp" />
+    <ClCompile Include="..\shims\shlwapi\ShlwapiShim.cpp" />
+    <ClCompile Include="..\shims\ole32\Ole32Shim.cpp" />
+    <ClCompile Include="..\shims\winmm\WinmmShim.cpp" />
+    <ClCompile Include="..\shims\version\VersionShim.cpp" />
+    <!-- pass-through shims -->
+    <ClCompile Include="..\shims\pass-through\D3D11Shim.cpp" />
+    <ClCompile Include="..\shims\pass-through\D3D12Shim.cpp" />
+    <ClCompile Include="..\shims\pass-through\XInputShim.cpp" />
+    <ClCompile Include="..\shims\pass-through\XAudio2Shim.cpp" />
+    <ClCompile Include="..\shims\pass-through\Ws2_32Shim.cpp" />
+    <ClCompile Include="..\shims\pass-through\MiscPassthroughShim.cpp" />
+    <!-- stub shims -->
+    <ClCompile Include="..\shims\stubs\SteamShim.cpp" />
+    <ClCompile Include="..\shims\stubs\DiscordShim.cpp" />
+    <ClCompile Include="..\shims\stubs\DirectSoundShim.cpp" />
+    <ClCompile Include="..\shims\stubs\MfplatShim.cpp" />
+    <ClCompile Include="..\shims\stubs\MiscStubShim.cpp" />
+    <!-- legacy graphics shims -->
+    <ClCompile Include="..\shims\legacy\D3D9Shim.cpp" />
+    <ClCompile Include="..\shims\legacy\D3D8Shim.cpp" />
+    <ClCompile Include="..\shims\legacy\DDrawShim.cpp" />
+    <ClCompile Include="..\shims\legacy\Opengl32Shim.cpp" />
+    <!-- Gap-fill files (Task IDs GAP-* — added to fill Half Sword's missing imports) -->
+    <ClCompile Include="..\shims\kernel32\Kernel32GapFill.cpp" />
+    <ClCompile Include="..\shims\kernel32\Kernel32BonusFill.cpp" />
+    <ClCompile Include="..\shims\user32\User32GapFill.cpp" />
+    <ClCompile Include="..\shims\pass-through\Ws2_32GapFill.cpp" />
+    <ClCompile Include="..\shims\advapi32\Advapi32GapFill.cpp" />
+    <ClCompile Include="..\shims\pass-through\Crypt32GapFill.cpp" />
+    <ClCompile Include="..\shims\MiscSystemGapFill.cpp" />
+    <ClCompile Include="..\shims\ExtMsGapFill.cpp" />
+    <ClCompile Include="..\shims\stubs\GameDllStubs.cpp" />
+    <ClCompile Include="..\shims\SimulationGapFill.cpp" />
+    <!-- bridges -->
+    <ClCompile Include="..\d3d11-bridge\D3D11Bridge.cpp" />
+    <ClCompile Include="..\bridges\XInputBridge.cpp" />
+    <ClCompile Include="..\bridges\KeyboardBridge.cpp" />
+    <ClCompile Include="..\bridges\AudioBridge.cpp" />
+    <ClCompile Include="..\bridges\GdiRenderer.cpp" />
+    <!-- UWP shell -->
+    <ClCompile Include="main.cpp" />
+    <ClCompile Include="App.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="..\pe-loader\PeLoader.h" />
+    <ClInclude Include="..\shims\ShimRegistry.h" />
+    <ClInclude Include="..\shims\ApiSetForwarder.h" />
+    <ClInclude Include="..\shims\CommonPre.h" />
+    <ClInclude Include="..\shims\Win32Types.h" />
+    <ClInclude Include="..\shims\kernel32\PathTranslator.h" />
+    <ClInclude Include="..\d3d11-bridge\D3D11Bridge.h" />
+    <ClInclude Include="..\bridges\XInputBridge.h" />
+    <ClInclude Include="..\bridges\KeyboardBridge.h" />
+    <ClInclude Include="..\bridges\AudioBridge.h" />
+    <ClInclude Include="..\bridges\GdiRenderer.h" />
+    <ClInclude Include="App.h" />
+    <ClInclude Include="pch.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <AppxManifest Include="Package.appxmanifest" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="run.config" />
+    <None Include="packages.config" />
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets" />
+</Project>

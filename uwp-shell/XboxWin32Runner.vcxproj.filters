@@ -1,0 +1,254 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="UWP Shell">
+      <UniqueIdentifier>{a0000000-0000-0000-0000-000000000001}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="PeLoader">
+      <UniqueIdentifier>{a0000000-0000-0000-0000-000000000002}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Shims">
+      <UniqueIdentifier>{a0000000-0000-0000-0000-000000000003}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Shims\kernel32">
+      <UniqueIdentifier>{a0000000-0000-0000-0000-000000000004}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Shims\user32">
+      <UniqueIdentifier>{a0000000-0000-0000-0000-000000000005}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Shims\gdi32">
+      <UniqueIdentifier>{a0000000-0000-0000-0000-000000000006}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Shims\advapi32">
+      <UniqueIdentifier>{a0000000-0000-0000-0000-000000000007}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Shims\shell32">
+      <UniqueIdentifier>{a0000000-0000-0000-0000-000000000008}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Shims\shlwapi">
+      <UniqueIdentifier>{a0000000-0000-0000-0000-000000000009}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Shims\ole32">
+      <UniqueIdentifier>{a0000000-0000-0000-0000-00000000000a}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Shims\winmm">
+      <UniqueIdentifier>{a0000000-0000-0000-0000-00000000000b}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Shims\version">
+      <UniqueIdentifier>{a0000000-0000-0000-0000-00000000000c}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Shims\pass-through">
+      <UniqueIdentifier>{a0000000-0000-0000-0000-00000000000d}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Shims\stubs">
+      <UniqueIdentifier>{a0000000-0000-0000-0000-00000000000e}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Shims\legacy">
+      <UniqueIdentifier>{a0000000-0000-0000-0000-00000000000f}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="D3D11 Bridge">
+      <UniqueIdentifier>{a0000000-0000-0000-0000-000000000010}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Bridges">
+      <UniqueIdentifier>{a0000000-0000-0000-0000-000000000011}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Assets">
+      <UniqueIdentifier>{a0000000-0000-0000-0000-000000000012}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <!-- UWP Shell -->
+    <ClCompile Include="main.cpp">
+      <Filter>UWP Shell</Filter>
+    </ClCompile>
+    <ClCompile Include="App.cpp">
+      <Filter>UWP Shell</Filter>
+    </ClCompile>
+    <ClInclude Include="App.h">
+      <Filter>UWP Shell</Filter>
+    </ClInclude>
+    <ClInclude Include="pch.h">
+      <Filter>UWP Shell</Filter>
+    </ClInclude>
+    <None Include="run.config">
+      <Filter>UWP Shell</Filter>
+    </None>
+    <None Include="packages.config">
+      <Filter>UWP Shell</Filter>
+    </None>
+    <AppxManifest Include="Package.appxmanifest">
+      <Filter>UWP Shell</Filter>
+    </AppxManifest>
+    <!-- PeLoader -->
+    <ClCompile Include="..\pe-loader\PeLoader.cpp">
+      <Filter>PeLoader</Filter>
+    </ClCompile>
+    <ClInclude Include="..\pe-loader\PeLoader.h">
+      <Filter>PeLoader</Filter>
+    </ClInclude>
+    <!-- Shims root -->
+    <ClCompile Include="..\shims\ShimRegistry.cpp">
+      <Filter>Shims</Filter>
+    </ClCompile>
+    <ClCompile Include="..\shims\ApiSetForwarder.cpp">
+      <Filter>Shims</Filter>
+    </ClCompile>
+    <ClCompile Include="..\shims\VcRuntimePassthrough.cpp">
+      <Filter>Shims</Filter>
+    </ClCompile>
+    <ClInclude Include="..\shims\ShimRegistry.h">
+      <Filter>Shims</Filter>
+    </ClInclude>
+    <ClInclude Include="..\shims\ApiSetForwarder.h">
+      <Filter>Shims</Filter>
+    </ClInclude>
+    <ClInclude Include="..\shims\CommonPre.h">
+      <Filter>Shims</Filter>
+    </ClInclude>
+    <ClInclude Include="..\shims\Win32Types.h">
+      <Filter>Shims</Filter>
+    </ClInclude>
+    <!-- Shims / kernel32 -->
+    <ClCompile Include="..\shims\kernel32\Kernel32Shim.cpp">
+      <Filter>Shims\kernel32</Filter>
+    </ClCompile>
+    <ClCompile Include="..\shims\kernel32\PathTranslator.cpp">
+      <Filter>Shims\kernel32</Filter>
+    </ClCompile>
+    <ClInclude Include="..\shims\kernel32\PathTranslator.h">
+      <Filter>Shims\kernel32</Filter>
+    </ClInclude>
+    <!-- Shims / user32 -->
+    <ClCompile Include="..\shims\user32\User32Shim.cpp">
+      <Filter>Shims\user32</Filter>
+    </ClCompile>
+    <!-- Shims / gdi32 -->
+    <ClCompile Include="..\shims\gdi32\Gdi32Shim.cpp">
+      <Filter>Shims\gdi32</Filter>
+    </ClCompile>
+    <!-- Shims / advapi32 -->
+    <ClCompile Include="..\shims\advapi32\Advapi32Shim.cpp">
+      <Filter>Shims\advapi32</Filter>
+    </ClCompile>
+    <!-- Shims / shell32 -->
+    <ClCompile Include="..\shims\shell32\Shell32Shim.cpp">
+      <Filter>Shims\shell32</Filter>
+    </ClCompile>
+    <!-- Shims / shlwapi -->
+    <ClCompile Include="..\shims\shlwapi\ShlwapiShim.cpp">
+      <Filter>Shims\shlwapi</Filter>
+    </ClCompile>
+    <!-- Shims / ole32 -->
+    <ClCompile Include="..\shims\ole32\Ole32Shim.cpp">
+      <Filter>Shims\ole32</Filter>
+    </ClCompile>
+    <!-- Shims / winmm -->
+    <ClCompile Include="..\shims\winmm\WinmmShim.cpp">
+      <Filter>Shims\winmm</Filter>
+    </ClCompile>
+    <!-- Shims / version -->
+    <ClCompile Include="..\shims\version\VersionShim.cpp">
+      <Filter>Shims\version</Filter>
+    </ClCompile>
+    <!-- Shims / pass-through -->
+    <ClCompile Include="..\shims\pass-through\D3D11Shim.cpp">
+      <Filter>Shims\pass-through</Filter>
+    </ClCompile>
+    <ClCompile Include="..\shims\pass-through\D3D12Shim.cpp">
+      <Filter>Shims\pass-through</Filter>
+    </ClCompile>
+    <ClCompile Include="..\shims\pass-through\XInputShim.cpp">
+      <Filter>Shims\pass-through</Filter>
+    </ClCompile>
+    <ClCompile Include="..\shims\pass-through\XAudio2Shim.cpp">
+      <Filter>Shims\pass-through</Filter>
+    </ClCompile>
+    <ClCompile Include="..\shims\pass-through\Ws2_32Shim.cpp">
+      <Filter>Shims\pass-through</Filter>
+    </ClCompile>
+    <ClCompile Include="..\shims\pass-through\MiscPassthroughShim.cpp">
+      <Filter>Shims\pass-through</Filter>
+    </ClCompile>
+    <!-- Shims / stubs -->
+    <ClCompile Include="..\shims\stubs\SteamShim.cpp">
+      <Filter>Shims\stubs</Filter>
+    </ClCompile>
+    <ClCompile Include="..\shims\stubs\DiscordShim.cpp">
+      <Filter>Shims\stubs</Filter>
+    </ClCompile>
+    <ClCompile Include="..\shims\stubs\DirectSoundShim.cpp">
+      <Filter>Shims\stubs</Filter>
+    </ClCompile>
+    <ClCompile Include="..\shims\stubs\MfplatShim.cpp">
+      <Filter>Shims\stubs</Filter>
+    </ClCompile>
+    <ClCompile Include="..\shims\stubs\MiscStubShim.cpp">
+      <Filter>Shims\stubs</Filter>
+    </ClCompile>
+    <!-- Shims / legacy -->
+    <ClCompile Include="..\shims\legacy\D3D9Shim.cpp">
+      <Filter>Shims\legacy</Filter>
+    </ClCompile>
+    <ClCompile Include="..\shims\legacy\D3D8Shim.cpp">
+      <Filter>Shims\legacy</Filter>
+    </ClCompile>
+    <ClCompile Include="..\shims\legacy\DDrawShim.cpp">
+      <Filter>Shims\legacy</Filter>
+    </ClCompile>
+    <ClCompile Include="..\shims\legacy\Opengl32Shim.cpp">
+      <Filter>Shims\legacy</Filter>
+    </ClCompile>
+    <!-- D3D11 Bridge -->
+    <ClCompile Include="..\d3d11-bridge\D3D11Bridge.cpp">
+      <Filter>D3D11 Bridge</Filter>
+    </ClCompile>
+    <ClInclude Include="..\d3d11-bridge\D3D11Bridge.h">
+      <Filter>D3D11 Bridge</Filter>
+    </ClInclude>
+    <!-- Bridges -->
+    <ClCompile Include="..\bridges\XInputBridge.cpp">
+      <Filter>Bridges</Filter>
+    </ClCompile>
+    <ClCompile Include="..\bridges\KeyboardBridge.cpp">
+      <Filter>Bridges</Filter>
+    </ClCompile>
+    <ClCompile Include="..\bridges\AudioBridge.cpp">
+      <Filter>Bridges</Filter>
+    </ClCompile>
+    <ClCompile Include="..\bridges\GdiRenderer.cpp">
+      <Filter>Bridges</Filter>
+    </ClCompile>
+    <ClInclude Include="..\bridges\XInputBridge.h">
+      <Filter>Bridges</Filter>
+    </ClInclude>
+    <ClInclude Include="..\bridges\KeyboardBridge.h">
+      <Filter>Bridges</Filter>
+    </ClInclude>
+    <ClInclude Include="..\bridges\AudioBridge.h">
+      <Filter>Bridges</Filter>
+    </ClInclude>
+    <ClInclude Include="..\bridges\GdiRenderer.h">
+      <Filter>Bridges</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="Assets\StoreLogo.png">
+      <Filter>Assets</Filter>
+    </None>
+    <None Include="Assets\Square150x150Logo.png">
+      <Filter>Assets</Filter>
+    </None>
+    <None Include="Assets\Square44x44Logo.png">
+      <Filter>Assets</Filter>
+    </None>
+    <None Include="Assets\Wide310x150Logo.png">
+      <Filter>Assets</Filter>
+    </None>
+    <None Include="Assets\SplashScreen.png">
+      <Filter>Assets</Filter>
+    </None>
+    <None Include="Assets\LockScreenLogo.png">
+      <Filter>Assets</Filter>
+    </None>
+  </ItemGroup>
+</Project>

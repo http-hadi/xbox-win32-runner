@@ -1,0 +1,3 @@
+# host_agent.py has no external dependencies — pure Python 3.9+ stdlib only.
+# (http.server, urllib, argparse, dataclasses, json, re, subprocess, hashlib,
+#  threading, socketserver — all batteries-included.)

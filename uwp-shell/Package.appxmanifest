@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+         xmlns:mp="http://schemas.microsoft.com/appx/2014/phone/manifest"
+         xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+         xmlns:uap3="http://schemas.microsoft.com/appx/manifest/uap/windows10/3"
+         xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+         xmlns:xbox="http://schemas.microsoft.com/appx/manifest/xbox/windows10/5"
+         IgnorableNamespaces="uap mp rescap uap3 xbox">
+
+  <Identity Name="Zai.XboxWin32Runner"
+            Publisher="CN=Zai"
+            Version="1.0.0.0" />
+
+  <mp:PhoneIdentity PhoneProductId="00000000-0000-0000-0000-000000000000"
+                    PhonePublisherId="00000000-0000-0000-0000-000000000000"/>
+
+  <Properties>
+    <DisplayName>Xbox Win32 Runner</DisplayName>
+    <PublisherDisplayName>Zai</PublisherDisplayName>
+    <Logo>Assets\StoreLogo.png</Logo>
+  </Properties>
+
+  <Resources>
+    <Resource Language="x-generate"/>
+  </Resources>
+
+  <Dependencies>
+    <TargetDeviceFamily Name="Windows.Xbox" MinVersion="10.0.22621.0" MaxVersionTested="10.0.22621.0" />
+  </Dependencies>
+
+  <Applications>
+    <Application Id="App"
+                 Executable="XboxWin32Runner.exe"
+                 EntryPoint="XboxWin32Runner.App">
+      <uap:VisualElements
+        DisplayName="Xbox Win32 Runner"
+        Square150x150Logo="Assets\Square150x150Logo.png"
+        Square44x44Logo="Assets\Square44x44Logo.png"
+        Description="Runs native Win32 executables on Xbox"
+        BackgroundColor="transparent">
+        <uap:DefaultTile Wide310x150Logo="Assets\Wide310x150Logo.png" >
+        </uap:DefaultTile>
+        <uap:SplashScreen Image="Assets\SplashScreen.png" />
+      </uap:VisualElements>
+      <Extensions>
+        <uap:Extension Category="windows.fileTypeAssociation">
+          <uap:FileTypeAssociation Name="exe">
+            <uap:SupportedFileTypes>
+              <uap:FileType>.exe</uap:FileType>
+            </uap:SupportedFileTypes>
+          </uap:FileTypeAssociation>
+        </uap:Extension>
+      </Extensions>
+    </Application>
+  </Applications>
+
+  <Capabilities>
+    <rescap:Capability Name="codeGeneration" />
+    <Capability Name="internetClient" />
+    <Capability Name="internetClientServer" />
+    <uap:Capability Name="removableStorage" />
+  </Capabilities>
+</Package>

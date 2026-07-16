@@ -1,0 +1,101 @@
+name: Build (MSVC)
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Add MSBuild to PATH
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install pefile (for PE scanner tests)
+        run: pip install pefile
+
+      - name: Verify PE scanner works
+        shell: pwsh
+        run: |
+          cd ${{ github.workspace }}
+          python tools/test_pe_scanner.py
+
+      - name: Create test certificate for signing
+        shell: pwsh
+        run: |
+          cd ${{ github.workspace }}\uwp-shell
+          $cert = New-SelfSignedCertificate -Type CodeSigningCert -Subject "CN=XboxWin32RunnerTest" -KeyUsage DigitalSignature -FriendlyName "Xbox Win32 Runner Test Cert" -CertStoreLocation "Cert:\CurrentUser\My" -KeyExportPolicy Exportable -KeyAlgorithm RSA -KeyLength 2048 -NotAfter (Get-Date).AddYears(1)
+          $pwd = ConvertTo-SecureString -String "Test1234!" -Force -AsPlainText
+          Export-PfxCertificate -Cert $cert -FilePath "XboxWin32RunnerTest.pfx" -Password $pwd
+          Write-Host "Certificate created: $($cert.Thumbprint)"
+
+      - name: Create solution file
+        shell: pwsh
+        run: |
+          cd ${{ github.workspace }}\uwp-shell
+          # VS needs a .sln to build a .vcxproj. Create a minimal one.
+          $slnContent = @"
+          Microsoft Visual Studio Solution File, Format Version 12.00
+          # Visual Studio Version 17
+          VisualStudioVersion = 17.0.31903.59
+          MinimumVisualStudioVersion = 10.0.40219.1
+          Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "XboxWin32Runner", "XboxWin32Runner.vcxproj", "{00000000-0000-0000-0000-000000000001}"
+          EndProject
+          Global
+            GlobalSection(SolutionConfigurationPlatforms) = preSolution
+              Debug|x64 = Debug|x64
+              Release|x64 = Release|x64
+            EndGlobalSection
+            GlobalSection(ProjectConfigurationPlatforms) = postSolution
+              {00000000-0000-0000-0000-000000000001}.Debug|x64.ActiveCfg = Debug|x64
+              {00000000-0000-0000-0000-000000000001}.Debug|x64.Build.0 = Debug|x64
+              {00000000-0000-0000-0000-000000000001}.Release|x64.ActiveCfg = Release|x64
+              {00000000-0000-0000-0000-000000000001}.Release|x64.Build.0 = Release|x64
+            EndGlobalSection
+          EndGlobal
+          "@
+          Set-Content -Path "XboxWin32Runner.sln" -Value $slnContent -Encoding UTF8
+
+      - name: Restore NuGet packages
+        shell: pwsh
+        run: |
+          cd ${{ github.workspace }}\uwp-shell
+          nuget restore XboxWin32Runner.sln 2>&1 | Out-Null
+          Write-Host "NuGet restore complete"
+
+      - name: Build (Debug x64)
+        shell: pwsh
+        run: |
+          cd ${{ github.workspace }}\uwp-shell
+          msbuild XboxWin32Runner.vcxproj /p:Configuration=Debug /p:Platform=x64 /m /v:minimal 2>&1 | Tee-Object -FilePath build_debug.log
+          $exitCode = $LASTEXITCODE
+          Write-Host "MSBuild exit code: $exitCode"
+          # Show the last 50 lines of build output for debugging
+          Get-Content build_debug.log -Tail 50
+          exit $exitCode
+
+      - name: Upload build log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-debug-log
+          path: uwp-shell/build_debug.log
+
+      - name: Upload appx on success
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: XboxWin32Runner-appx
+          path: |
+            uwp-shell/x64/Debug/XboxWin32Runner.appx
+            uwp-shell/x64/Debug/XboxWin32Runner.exe
