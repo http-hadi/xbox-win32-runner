@@ -73,11 +73,31 @@ jobs:
           nuget restore XboxWin32Runner.sln 2>&1 | Out-Null
           Write-Host "NuGet restore complete"
 
-      - name: Kill WIN32_LEAN_AND_MEAN from UWP build targets
-        shell: cmd
+      - name: Generate properly-sized PNG assets
+        shell: pwsh
         run: |
-          :: Fast search-and-replace using findstr + powershell, only in the build directory
-          powershell -Command "Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\build\' -Recurse -Include '*.props','*.targets' | ForEach-Object { $c = Get-Content $_.FullName -Raw; if ($c -match 'WIN32_LEAN_AND_MEAN') { $c = $c -replace 'WIN32_LEAN_AND_MEAN','WIN32_LEAN_DISABLED'; Set-Content $_.FullName -Value $c; Write-Host ('Patched: ' + $_.Name) } }"
+          cd ${{ github.workspace }}\uwp-shell\Assets
+          # Use .NET System.Drawing to create properly-sized PNGs
+          Add-Type -AssemblyName System.Drawing
+          $sizes = @{
+            "Square150x150Logo.png" = @(150, 150)
+            "Square44x44Logo.png" = @(44, 44)
+            "Wide310x150Logo.png" = @(310, 150)
+            "StoreLogo.png" = @(50, 50)
+            "SplashScreen.png" = @(620, 300)
+            "LockScreenLogo.png" = @(24, 24)
+          }
+          foreach ($name in $sizes.Keys) {
+            $w = $sizes[$name][0]
+            $h = $sizes[$name][1]
+            $bmp = New-Object System.Drawing.Bitmap($w, $h)
+            $g = [System.Drawing.Graphics]::FromImage($bmp)
+            $g.Clear([System.Drawing.Color]::Black)
+            $bmp.Save($name, [System.Drawing.Imaging.ImageFormat]::Png)
+            $g.Dispose()
+            $bmp.Dispose()
+            Write-Host "Created $name ($w x $h)"
+          }
 
       - name: Build (Debug x64)
         shell: pwsh
