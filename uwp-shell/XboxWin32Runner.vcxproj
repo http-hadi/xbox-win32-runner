@@ -53,7 +53,7 @@
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <CompileAsWinRT>false</CompileAsWinRT>
       <ForcedIncludeFiles>CommonPre.h</ForcedIncludeFiles>
-      <PreprocessorDefinitions>_UNICODE;UNICODE;WINRT_ENABLED;XWR_UWP_BUILD;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>WIN32_LEAN_AND_MEAN=0;_UNICODE;UNICODE;WINRT_ENABLED;XWR_UWP_BUILD;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <UndefinePreprocessorDefinitions>WIN32_LEAN_AND_MEAN;NOGDI;NOUSER;NOSERVICE;NOSOUND;NOCOMM;NOCRYPT;NOHELP;NOMCX;NOMB;NOICONS;NOMENUS;NOMSG;NOSCROLL;NOTEXTMETRIC;%(UndefinePreprocessorDefinitions)</UndefinePreprocessorDefinitions>
       <AdditionalOptions>/U WIN32_LEAN_AND_MEAN /U NOGDI /U NOUSER /U NOSERVICE /U NOSOUND /U NOCOMM /U NOCRYPT /U NOHELP %(AdditionalOptions)</AdditionalOptions>
       <AdditionalIncludeDirectories>$(ProjectDir);$(ProjectDir)..\pe-loader;$(ProjectDir)..\shims;$(ProjectDir)..\shims\kernel32;$(ProjectDir)..\shims\user32;$(ProjectDir)..\shims\gdi32;$(ProjectDir)..\shims\advapi32;$(ProjectDir)..\shims\shell32;$(ProjectDir)..\shims\shlwapi;$(ProjectDir)..\shims\ole32;$(ProjectDir)..\shims\winmm;$(ProjectDir)..\shims\version;$(ProjectDir)..\shims\pass-through;$(ProjectDir)..\shims\stubs;$(ProjectDir)..\shims\legacy;$(ProjectDir)..\d3d11-bridge;$(ProjectDir)..\bridges;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>

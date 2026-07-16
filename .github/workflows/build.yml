@@ -73,26 +73,38 @@ jobs:
           nuget restore XboxWin32Runner.sln 2>&1 | Out-Null
           Write-Host "NuGet restore complete"
 
-      - name: Remove WIN32_LEAN_AND_MEAN from all UWP/SDK build targets
+      - name: Find and kill WIN32_LEAN_AND_MEAN everywhere
         shell: pwsh
         run: |
-          # The UWP MSBuild targets define WIN32_LEAN_AND_MEAN which strips
-          # winuser.h, mmsystem.h, winsvc.h, shlobj.h, etc. from windows.h.
-          # We patch ALL .props and .targets files that reference it.
-          $files = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\build\" -Recurse -Include "*.props","*.targets" -ErrorAction SilentlyContinue
-          $patched = 0
-          foreach ($f in $files) {
-            $content = Get-Content $f.FullName -Raw -ErrorAction SilentlyContinue
-            if ($content -match 'WIN32_LEAN_AND_MEAN') {
-              $content = $content -replace 'WIN32_LEAN_AND_MEAN', 'WIN32_LEAN_AND_MEAN_DISABLED'
-              Set-Content $f.FullName -Value $content
-              $patched++
-              Write-Host "Patched: $($f.FullName)"
-            }
+          # Search ALL .props, .targets, and .cpp files in the SDK for WIN32_LEAN_AND_MEAN
+          Write-Host "Searching for WIN32_LEAN_AND_MEAN in SDK build files..."
+          $allFiles = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\" -Recurse -Include "*.props","*.targets","*.cpp","*.h" -ErrorAction SilentlyContinue
+          $found = @()
+          foreach ($f in $allFiles) {
+            try {
+              $content = Get-Content $f.FullName -Raw -ErrorAction SilentlyContinue
+              if ($content -and ($content -match 'WIN32_LEAN_AND_MEAN')) {
+                $found += $f.FullName
+                # Replace it
+                $content = $content -replace 'WIN32_LEAN_AND_MEAN', 'WIN32_LEAN_AND_MEAN_DISABLED'
+                Set-Content $f.FullName -Value $content -ErrorAction SilentlyContinue
+              }
+            } catch {}
           }
-          Write-Host "Total files patched: $patched"
-          if ($patched -eq 0) {
-            Write-Host "WARNING: No files containing WIN32_LEAN_AND_MEAN were found"
+          Write-Host "Found and patched $($found.Count) files:"
+          $found | ForEach-Object { Write-Host "  $_" }
+          
+          # Also check MSBuild targets
+          $msbuildFiles = Get-ChildItem "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\MSBuild\" -Recurse -Include "*.props","*.targets" -ErrorAction SilentlyContinue
+          foreach ($f in $msbuildFiles) {
+            try {
+              $content = Get-Content $f.FullName -Raw -ErrorAction SilentlyContinue
+              if ($content -and ($content -match 'WIN32_LEAN_AND_MEAN')) {
+                $content = $content -replace 'WIN32_LEAN_AND_MEAN', 'WIN32_LEAN_AND_MEAN_DISABLED'
+                Set-Content $f.FullName -Value $content -ErrorAction SilentlyContinue
+                Write-Host "Patched MSBuild: $($f.FullName)"
+              }
+            } catch {}
           }
 
       - name: Build (Debug x64)
