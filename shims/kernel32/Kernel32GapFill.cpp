@@ -465,10 +465,10 @@ extern "C" int    __stdcall Shim_GetGeoInfoW(GEOID g, GEOTYPE t, LPWSTR b, int n
 extern "C" GEOID  __stdcall Shim_GetUserGeoID(GEOTYPE t)               { return ::GetUserGeoID(t); }
 extern "C" int    __stdcall Shim_CompareStringA(LCID l, DWORD f, LPCSTR a, int na, LPCSTR b, int nb) { return ::CompareStringA(l, f, a, na, b, nb); }
 extern "C" int    __stdcall Shim_CompareStringW(LCID l, DWORD f, LPCWSTR a, int na, LPCWSTR b, int nb) { return ::CompareStringW(l, f, a, na, b, nb); }
-extern "C" int    __stdcall Shim_CompareStringEx(LPCWSTR n, DWORD f, LPCWSTR a, int na, LPCWSTR b, int nb, LPNLSVERSIONINFOEX v, LPVOID p, LPARAM l) { return ::CompareStringEx(n, f, a, na, b, nb, v, p, l); }
+extern "C" int    __stdcall Shim_CompareStringEx(LPCWSTR n, DWORD f, LPCWSTR a, int na, LPCWSTR b, int nb, LPNLSVERSIONINFOEX v, LPVOID p, LPARAM l) { return ::CompareStringEx(n, f, a, na, b, nb, reinterpret_cast<LPNLSVERSIONINFO>(v), p, l); }
 extern "C" int    __stdcall Shim_CompareStringOrdinal(LPCWSTR a, int na, LPCWSTR b, int nb, BOOL i)   { return ::CompareStringOrdinal(a, na, b, nb, i); }
 extern "C" int    __stdcall Shim_LCMapStringW(LCID l, DWORD f, LPCWSTR s, int ns, LPWSTR d, int nd)    { return ::LCMapStringW(l, f, s, ns, d, nd); }
-extern "C" int    __stdcall Shim_LCMapStringEx(LPCWSTR n, DWORD f, LPCWSTR s, int ns, LPWSTR d, int nd, LPNLSVERSIONINFOEX v, LPVOID p, LPARAM l) { return ::LCMapStringEx(n, f, s, ns, d, nd, v, p, l); }
+extern "C" int    __stdcall Shim_LCMapStringEx(LPCWSTR n, DWORD f, LPCWSTR s, int ns, LPWSTR d, int nd, LPNLSVERSIONINFOEX v, LPVOID p, LPARAM l) { return ::LCMapStringEx(n, f, s, ns, d, nd, reinterpret_cast<LPNLSVERSIONINFO>(v), p, l); }
 extern "C" int    __stdcall Shim_GetDateFormatW(LCID l, DWORD f, const SYSTEMTIME* t, LPCWSTR fmt, LPWSTR d, int nd) { return ::GetDateFormatW(l, f, t, fmt, d, nd); }
 extern "C" int    __stdcall Shim_GetDateFormatEx(LPCWSTR n, DWORD f, const SYSTEMTIME* t, LPCWSTR fmt, LPWSTR d, int nd, LPCWSTR cal) { return ::GetDateFormatEx(n, f, t, fmt, d, nd, cal); }
 extern "C" int    __stdcall Shim_GetTimeFormatW(LCID l, DWORD f, const SYSTEMTIME* t, LPCWSTR fmt, LPWSTR d, int nd) { return ::GetTimeFormatW(l, f, t, fmt, d, nd); }
