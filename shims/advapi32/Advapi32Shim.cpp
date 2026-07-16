@@ -399,3 +399,23 @@ REGISTER_SHIM("advapi32", "CryptGenRandom", (FARPROC)&xwr::Shim_CryptGenRandom);
 REGISTER_SHIM("advapi32", "BCryptOpenAlgorithmProvider", (FARPROC)&xwr::Shim_BCryptOpenAlgorithmProvider);
 REGISTER_SHIM("advapi32", "BCryptGenRandom", (FARPROC)&xwr::Shim_BCryptGenRandom);
 REGISTER_SHIM("advapi32", "BCryptCloseAlgorithmProvider", (FARPROC)&xwr::Shim_BCryptCloseAlgorithmProvider);
+
+// ---------------------------------------------------------------------------
+// Alias registrations: many games import these functions under the legacy
+// module names (bcrypt.dll, crypt32.dll, kernel32.dll, kernelbase.dll) rather
+// than under advapi32. Windows itself forwards these imports from those
+// modules to advapi32 via API-set redirection; we mirror that here so the
+// shim registry resolves them under whatever module name a game imports.
+// (The function definitions remain solely in this file; these are pure
+// alias registrations — no duplicate definitions, so no LNK2005.)
+// ---------------------------------------------------------------------------
+REGISTER_SHIM("bcrypt", "BCryptOpenAlgorithmProvider", (FARPROC)&xwr::Shim_BCryptOpenAlgorithmProvider);
+REGISTER_SHIM("bcrypt", "BCryptGenRandom",          (FARPROC)&xwr::Shim_BCryptGenRandom);
+REGISTER_SHIM("bcrypt", "BCryptCloseAlgorithmProvider", (FARPROC)&xwr::Shim_BCryptCloseAlgorithmProvider);
+
+REGISTER_SHIM("crypt32", "CryptAcquireContextW", (FARPROC)&xwr::Shim_CryptAcquireContextW);
+REGISTER_SHIM("crypt32", "CryptGenRandom",       (FARPROC)&xwr::Shim_CryptGenRandom);
+
+REGISTER_SHIM("kernel32",   "GetUserNameW", (FARPROC)&xwr::Shim_GetUserNameW);
+REGISTER_SHIM("kernelbase", "GetUserNameW", (FARPROC)&xwr::Shim_GetUserNameW);
+

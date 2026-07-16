@@ -245,7 +245,6 @@
   #pragma comment(lib, "rpcrt4.lib")
   #pragma comment(lib, "avrt.lib")
   #pragma comment(lib, "wintrust.lib")
-  #pragma comment(lib, "fci.lib")
   #pragma comment(lib, "comdlg32.lib")
   #pragma comment(lib, "psapi.lib")
 

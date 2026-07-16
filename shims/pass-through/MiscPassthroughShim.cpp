@@ -1,6 +1,8 @@
 // shims/pass-through/MiscPassthroughShim.cpp
-// Pass-through shims for D2D1 / DWrite / WIC / Crypt32 / BCrypt. These UWP
-// APIs are all AppContainer-safe so we just forward to the real functions.
+// Pass-through shims for D2D1 / DWrite / WIC. These UWP APIs are all
+// AppContainer-safe so we just forward to the real functions.
+// (Crypt32 / BCrypt shims used to live here too, but are now implemented
+// in shims/advapi32/Advapi32Shim.cpp — see note near end of file.)
 
 #include "UwpSdkIncludes.h"
 
@@ -78,31 +80,10 @@ extern "C" HRESULT __stdcall Shim_WICConvertBitmapSource(const GUID& dstFormat,
     return ::WICConvertBitmapSource(dstFormat, pISrc, ppIDst);
 }
 
-// ---------------------------------------------------------------------------
-// crypt32
-// ---------------------------------------------------------------------------
-extern "C" BOOL __stdcall Shim_CryptAcquireContextW(HCRYPTPROV* phProv, LPCWSTR szContainer,
-                                                     LPCWSTR szProvider, DWORD dwProvType, DWORD dwFlags) {
-    return ::CryptAcquireContextW(phProv, szContainer, szProvider, dwProvType, dwFlags);
-}
-extern "C" BOOL __stdcall Shim_CryptGenRandom(HCRYPTPROV hProv, DWORD dwLen, BYTE* pbBuffer) {
-    return ::CryptGenRandom(hProv, dwLen, pbBuffer);
-}
-
-// ---------------------------------------------------------------------------
-// bcrypt — pass through (forward declarations live in Windows.h)
-// ---------------------------------------------------------------------------
-extern "C" BOOL __stdcall Shim_BCryptOpenAlgorithmProvider(void** phAlgorithm, LPCWSTR pszAlgId,
-                                                            LPCWSTR pszImplementation, ULONG dwFlags) {
-    return ::BCryptOpenAlgorithmProvider(phAlgorithm, pszAlgId, pszImplementation, dwFlags);
-}
-extern "C" BOOL __stdcall Shim_BCryptGenRandom(void* hAlgorithm, PUCHAR pbBuffer, ULONG cbBuffer,
-                                                ULONG dwFlags) {
-    return ::BCryptGenRandom(hAlgorithm, pbBuffer, cbBuffer, dwFlags);
-}
-extern "C" BOOL __stdcall Shim_BCryptCloseAlgorithmProvider(void* hAlgorithm, ULONG dwFlags) {
-    return ::BCryptCloseAlgorithmProvider(hAlgorithm, dwFlags);
-}
+// NOTE: crypt32 / bcrypt shims (CryptAcquireContextW, CryptGenRandom,
+// BCryptOpenAlgorithmProvider, BCryptGenRandom, BCryptCloseAlgorithmProvider)
+// are implemented in shims/advapi32/Advapi32Shim.cpp. They were previously
+// also defined here, causing LNK2005 duplicate-symbol errors at link time.
 
 }  // namespace xwr
 
@@ -118,9 +99,5 @@ REGISTER_SHIM("dwrite.dll", "DWriteCreateFactory", (FARPROC)&xwr::Shim_DWriteCre
 REGISTER_SHIM("windowscodecs", "WICCreateImagingFactory", (FARPROC)&xwr::Shim_WICCreateImagingFactory);
 REGISTER_SHIM("windowscodecs", "WICConvertBitmapSource", (FARPROC)&xwr::Shim_WICConvertBitmapSource);
 
-REGISTER_SHIM("crypt32", "CryptAcquireContextW", (FARPROC)&xwr::Shim_CryptAcquireContextW);
-REGISTER_SHIM("crypt32", "CryptGenRandom", (FARPROC)&xwr::Shim_CryptGenRandom);
-
-REGISTER_SHIM("bcrypt", "BCryptOpenAlgorithmProvider", (FARPROC)&xwr::Shim_BCryptOpenAlgorithmProvider);
-REGISTER_SHIM("bcrypt", "BCryptGenRandom", (FARPROC)&xwr::Shim_BCryptGenRandom);
-REGISTER_SHIM("bcrypt", "BCryptCloseAlgorithmProvider", (FARPROC)&xwr::Shim_BCryptCloseAlgorithmProvider);
+// NOTE: crypt32 / bcrypt registrations intentionally omitted here — see note
+// above. Those symbols are registered from shims/advapi32/Advapi32Shim.cpp.

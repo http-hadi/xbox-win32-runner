@@ -34,11 +34,7 @@ extern "C" BOOL __stdcall Shim_SetInformationJobObject(HANDLE job, int infoClass
     ::SetLastError(ERROR_ACCESS_DENIED);
     return FALSE;
 }
-extern "C" BOOL __stdcall Shim_QueryInformationJobObject(HANDLE job, int infoClass,
-                                                           LPVOID info, DWORD infoLen, LPDWORD retLen) {
-    ::SetLastError(ERROR_ACCESS_DENIED);
-    return FALSE;
-}
+// NOTE: Shim_QueryInformationJobObject is implemented in Kernel32GapFill.cpp.
 
 // SetHandleCount — legacy Win16 API. Modern Windows ignores it and returns the
 // value passed in. CRT init calls it with 512.
@@ -53,12 +49,12 @@ REGISTER_SHIM("kernel32", "CreateJobObjectA", (FARPROC)&xwr::Shim_CreateJobObjec
 REGISTER_SHIM("kernel32", "CreateJobObjectW", (FARPROC)&xwr::Shim_CreateJobObjectW);
 REGISTER_SHIM("kernel32", "AssignProcessToJobObject", (FARPROC)&xwr::Shim_AssignProcessToJobObject);
 REGISTER_SHIM("kernel32", "SetInformationJobObject", (FARPROC)&xwr::Shim_SetInformationJobObject);
-REGISTER_SHIM("kernel32", "QueryInformationJobObject", (FARPROC)&xwr::Shim_QueryInformationJobObject);
+// NOTE: QueryInformationJobObject registration lives in Kernel32GapFill.cpp.
 REGISTER_SHIM("kernel32", "SetHandleCount", (FARPROC)&xwr::Shim_SetHandleCount);
 REGISTER_SHIM("kernelbase", "SearchPathW", (FARPROC)&xwr::Shim_SearchPathW);
 REGISTER_SHIM("kernelbase", "CreateJobObjectA", (FARPROC)&xwr::Shim_CreateJobObjectA);
 REGISTER_SHIM("kernelbase", "CreateJobObjectW", (FARPROC)&xwr::Shim_CreateJobObjectW);
 REGISTER_SHIM("kernelbase", "AssignProcessToJobObject", (FARPROC)&xwr::Shim_AssignProcessToJobObject);
 REGISTER_SHIM("kernelbase", "SetInformationJobObject", (FARPROC)&xwr::Shim_SetInformationJobObject);
-REGISTER_SHIM("kernelbase", "QueryInformationJobObject", (FARPROC)&xwr::Shim_QueryInformationJobObject);
+// NOTE: kernelbase QueryInformationJobObject registration lives in Kernel32GapFill.cpp.
 REGISTER_SHIM("kernelbase", "SetHandleCount", (FARPROC)&xwr::Shim_SetHandleCount);

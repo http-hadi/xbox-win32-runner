@@ -100,26 +100,10 @@ extern "C" HRESULT __stdcall Shim_WerReportCloseHandle(HREPORT) {
 
 // ===========================================================================
 // 2) ext-ms-win-dxcore-l1-1-0.dll — DXCoreCreateAdapterFactory.
-//    Pass-through to the real UWP implementation (linked via dxcore.lib on
-//    a real Windows build). Under XWR_SYNTAX_CHECK we can't link the .lib,
-//    so the stub path returns S_OK with *ppvFactory = nullptr.
+//    NOTE: This shim used to live here, but is now implemented in
+//    shims/stubs/MiscStubShim.cpp (registered under "dxcore"). Removing the
+//    duplicate definition avoids LNK2005 errors at link time.
 // ===========================================================================
-extern "C" HRESULT __stdcall Shim_DXCoreCreateAdapterFactory(const IID& riid, void** ppvFactory) {
-#ifndef XWR_SYNTAX_CHECK
-  #if defined(XWR_HAS_DXCORE)
-    return ::DXCoreCreateAdapterFactory(riid, ppvFactory);
-  #else
-    // <dxcore.h> isn't available on this toolchain — fall back to a stub.
-    (void)riid;
-    if (ppvFactory) *ppvFactory = nullptr;
-    return E_NOTIMPL;
-  #endif
-#else
-    (void)riid;
-    if (ppvFactory) *ppvFactory = nullptr;
-    return S_OK;
-#endif
-}
 
 // ===========================================================================
 // 3-5) DXGK / ntuser-uicontext ordinal stubs.
@@ -151,8 +135,9 @@ REGISTER_SHIM("ext-ms-win-wer-reporting-l1-1-0", "WerReportCloseHandle", (FARPRO
 
 // ---------------------------------------------------------------------------
 // 2) ext-ms-win-dxcore-l1-1-0.dll (1 function)
+//    NOTE: DXCoreCreateAdapterFactory is registered from
+//    shims/stubs/MiscStubShim.cpp under the "dxcore" module.
 // ---------------------------------------------------------------------------
-REGISTER_SHIM("ext-ms-win-dxcore-l1-1-0", "DXCoreCreateAdapterFactory", (FARPROC)&xwr::Shim_DXCoreCreateAdapterFactory);
 
 // ---------------------------------------------------------------------------
 // 3) ext-ms-win-dx-d3dkmt-dxcore-l1-1-0.dll (ordinals 2..213 inclusive)

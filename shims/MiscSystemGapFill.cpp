@@ -246,10 +246,7 @@ extern "C" BOOL __stdcall Shim_SetPixelFormat(HDC hdc, int iPixelFormat, const P
 extern "C" BOOL __stdcall Shim_SwapBuffers(HDC hdc) {
     return ::SwapBuffers(hdc);
 }
-extern "C" BOOL __stdcall Shim_ExtTextOutW(HDC hdc, int x, int y, UINT fuOptions, const RECT* lprc,
-                                          LPCWSTR lpString, UINT cbCount, const INT* lpDx) {
-    return ::ExtTextOutW(hdc, x, y, fuOptions, lprc, lpString, cbCount, lpDx);
-}
+// NOTE: Shim_ExtTextOutW is implemented in shims/user32/User32Shim.cpp.
 
 // ===========================================================================
 // 5) shell32 — 1 pass-through (CommandLineToArgvW)
@@ -572,9 +569,6 @@ extern "C" NTSTATUS __stdcall Shim_NtWriteFile(HANDLE FileHandle, HANDLE Event, 
     return ::NtWriteFile(FileHandle, Event, ApcRoutine, ApcContext, IoStatusBlock, Buffer, Length, ByteOffset, Key);
 #endif
 }
-extern "C" VOID    __stdcall Shim_RtlCaptureContext(PCONTEXT ContextRecord) {
-    ::RtlCaptureContext(ContextRecord);
-}
 extern "C" VOID    __stdcall Shim_RtlInitUnicodeString(PUNICODE_STRING DestinationString, PCWSTR SourceString) {
     ::RtlInitUnicodeString(DestinationString, SourceString);
 }
@@ -587,15 +581,8 @@ extern "C" BOOLEAN __stdcall Shim_RtlIsCriticalSectionLockedByThread(PRTL_CRITIC
     return ::RtlIsCriticalSectionLockedByThread(CriticalSection);
 #endif
 }
-extern "C" PVOID   __stdcall Shim_RtlLookupFunctionEntry(DWORD64 ControlPc, PDWORD64 ImageBase,
-                                                        PUNWIND_HISTORY_TABLE HistoryTable) {
-    return ::RtlLookupFunctionEntry(ControlPc, ImageBase, HistoryTable);
-}
 extern "C" ULONG   __stdcall Shim_RtlNtStatusToDosError(NTSTATUS Status) {
     return ::RtlNtStatusToDosError(Status);
-}
-extern "C" PVOID   __stdcall Shim_RtlPcToFileHeader(PVOID PcValue, PVOID* BaseOfImage) {
-    return ::RtlPcToFileHeader(PcValue, BaseOfImage);
 }
 extern "C" BOOLEAN __stdcall Shim_RtlRunOnceExecuteOnce(PRTL_RUN_ONCE RunOnce, PRTL_RUN_ONCE_INIT_FN InitFn,
                                                         PVOID Context, PVOID* Parameter) {
@@ -615,15 +602,8 @@ extern "C" BOOLEAN __stdcall Shim_RtlRunOnceExecuteOnce(PRTL_RUN_ONCE RunOnce, P
     return ::RtlRunOnceExecuteOnce(RunOnce, InitFn, Context, Parameter);
 #endif
 }
-extern "C" VOID    __stdcall Shim_RtlUnwind(PVOID TargetFrame, PVOID TargetIp, PEXCEPTION_RECORD ExceptionRecord,
-                                            PVOID ReturnValue) {
-    ::RtlUnwind(TargetFrame, TargetIp, ExceptionRecord, ReturnValue);
-}
-extern "C" VOID    __stdcall Shim_RtlUnwindEx(PVOID TargetFrame, PVOID TargetIp, PEXCEPTION_RECORD ExceptionRecord,
-                                              PVOID ReturnValue, PCONTEXT ContextRecord,
-                                              PUNWIND_HISTORY_TABLE HistoryTable) {
-    ::RtlUnwindEx(TargetFrame, TargetIp, ExceptionRecord, ReturnValue, ContextRecord, HistoryTable);
-}
+// NOTE: Shim_RtlUnwind / Shim_RtlUnwindEx / Shim_RtlVirtualUnwind are
+// implemented in shims/kernel32/Kernel32GapFill.cpp.
 extern "C" NTSTATUS __stdcall Shim_RtlUTF8ToUnicodeN(PWSTR UnicodeStringDestination,
                                                     ULONG UnicodeStringMaxByteCount,
                                                     PULONG UnicodeStringActualByteCount,
@@ -637,13 +617,6 @@ extern "C" NTSTATUS __stdcall Shim_RtlUTF8ToUnicodeN(PWSTR UnicodeStringDestinat
     return ::RtlUTF8ToUnicodeN(UnicodeStringDestination, UnicodeStringMaxByteCount,
                                UnicodeStringActualByteCount, UTF8StringSource, UTF8StringByteCount);
 #endif
-}
-extern "C" PEXCEPTION_ROUTINE __stdcall Shim_RtlVirtualUnwind(DWORD HandlerType, DWORD64 ImageBase, DWORD64 ControlPc,
-                                                   PIMAGE_RUNTIME_FUNCTION_ENTRY FunctionEntry, PCONTEXT ContextRecord,
-                                                   PVOID* HandlerData, PULONG_PTR EstablisherFrame,
-                                                   PKNONVOLATILE_CONTEXT_POINTERS ContextPointers) {
-    return ::RtlVirtualUnwind(HandlerType, ImageBase, ControlPc, FunctionEntry, ContextRecord,
-                              HandlerData, EstablisherFrame, ContextPointers);
 }
 
 // ===========================================================================
@@ -959,12 +932,12 @@ REGISTER_SHIM("oleaut32", "ordinal:200", (FARPROC)&xwr::Shim_OleAut_Ord200);
 REGISTER_SHIM("oleaut32", "ordinal:411", (FARPROC)&xwr::Shim_OleAut_Ord411);
 
 // ---------------------------------------------------------------------------
-// gdi32 (4)
+// gdi32 (3 here; ExtTextOutW lives in User32Shim.cpp)
 // ---------------------------------------------------------------------------
 REGISTER_SHIM("gdi32", "ChoosePixelFormat", (FARPROC)&xwr::Shim_ChoosePixelFormat);
 REGISTER_SHIM("gdi32", "SetPixelFormat",    (FARPROC)&xwr::Shim_SetPixelFormat);
 REGISTER_SHIM("gdi32", "SwapBuffers",       (FARPROC)&xwr::Shim_SwapBuffers);
-REGISTER_SHIM("gdi32", "ExtTextOutW",       (FARPROC)&xwr::Shim_ExtTextOutW);
+// NOTE: ExtTextOutW registration lives in shims/user32/User32Shim.cpp.
 
 // ---------------------------------------------------------------------------
 // shell32 (1)
@@ -1087,21 +1060,18 @@ REGISTER_SHIM("wintrust", "WTHelperGetProvSignerFromChain",      (FARPROC)&xwr::
 REGISTER_SHIM("wintrust", "WTHelperProvDataFromStateData",       (FARPROC)&xwr::Shim_WTHelperProvDataFromStateData);
 
 // ---------------------------------------------------------------------------
-// ntdll (13)
+// ntdll (7 here; 6 Rtl* unwinding ones live in Kernel32GapFill.cpp)
 // ---------------------------------------------------------------------------
 REGISTER_SHIM("ntdll", "NtSetInformationThread",            (FARPROC)&xwr::Shim_NtSetInformationThread);
 REGISTER_SHIM("ntdll", "NtWriteFile",                        (FARPROC)&xwr::Shim_NtWriteFile);
-REGISTER_SHIM("ntdll", "RtlCaptureContext",                  (FARPROC)&xwr::Shim_RtlCaptureContext);
+// NOTE: RtlCaptureContext / RtlLookupFunctionEntry / RtlPcToFileHeader /
+// RtlUnwind / RtlUnwindEx / RtlVirtualUnwind registrations live in
+// shims/kernel32/Kernel32GapFill.cpp.
 REGISTER_SHIM("ntdll", "RtlInitUnicodeString",               (FARPROC)&xwr::Shim_RtlInitUnicodeString);
 REGISTER_SHIM("ntdll", "RtlIsCriticalSectionLockedByThread", (FARPROC)&xwr::Shim_RtlIsCriticalSectionLockedByThread);
-REGISTER_SHIM("ntdll", "RtlLookupFunctionEntry",             (FARPROC)&xwr::Shim_RtlLookupFunctionEntry);
 REGISTER_SHIM("ntdll", "RtlNtStatusToDosError",              (FARPROC)&xwr::Shim_RtlNtStatusToDosError);
-REGISTER_SHIM("ntdll", "RtlPcToFileHeader",                  (FARPROC)&xwr::Shim_RtlPcToFileHeader);
 REGISTER_SHIM("ntdll", "RtlRunOnceExecuteOnce",              (FARPROC)&xwr::Shim_RtlRunOnceExecuteOnce);
-REGISTER_SHIM("ntdll", "RtlUnwind",                          (FARPROC)&xwr::Shim_RtlUnwind);
-REGISTER_SHIM("ntdll", "RtlUnwindEx",                        (FARPROC)&xwr::Shim_RtlUnwindEx);
 REGISTER_SHIM("ntdll", "RtlUTF8ToUnicodeN",                  (FARPROC)&xwr::Shim_RtlUTF8ToUnicodeN);
-REGISTER_SHIM("ntdll", "RtlVirtualUnwind",                   (FARPROC)&xwr::Shim_RtlVirtualUnwind);
 
 // ---------------------------------------------------------------------------
 // dwmapi (4)

@@ -5,7 +5,8 @@
 // These are:
 //   - Compiler intrinsics exported from kernel32 (YieldProcessor, MemoryBarrier, etc.)
 //   - UWP-specific memory APIs (VirtualAllocFromApp, VirtualProtectFromApp)
-//   - Cross-DLL forwarders (GetUserNameW from kernel32 → advapi32)
+//   - Cross-DLL forwarders (GetUserNameW from kernel32 → advapi32 — now
+//     implemented in shims/advapi32/Advapi32Shim.cpp)
 //   - DLL name normalization fixes (gfsdk_aftermath_lib.x64)
 //   - Missing ntdll/dwmapi/d3dcompiler/msi entries
 
@@ -62,23 +63,10 @@ extern "C" BOOL __stdcall Shim_VirtualProtectFromApp(LPVOID addr, SIZE_T size,
 }
 
 // ---------------------------------------------------------------------------
-// GetUserNameW — forwarded from kernel32 to advapi32. Some games import it
-// from kernel32 directly.
+// GetUserNameW — NOTE: this shim used to live here, but is now implemented
+// in shims/advapi32/Advapi32Shim.cpp. Removing the duplicate avoids LNK2005
+// errors at link time.
 // ---------------------------------------------------------------------------
-extern "C" BOOL __stdcall Shim_GetUserNameW(LPWSTR buf, LPDWORD size) {
-    // Forward to advapi32's GetUserNameW
-    // (declared in our stub Windows.h under advapi32)
-    // We can't call the real one in syntax-check mode, so stub it
-    if (buf && size && *size > 0) {
-        const wchar_t* user = L"XboxUser";
-        size_t len = 7;
-        if (len >= *size) { *size = len + 1; return FALSE; }
-        for (size_t i = 0; i <= len; ++i) buf[i] = user[i];
-        *size = static_cast<DWORD>(len);
-        return TRUE;
-    }
-    return FALSE;
-}
 
 // ---------------------------------------------------------------------------
 // D3DCompile — the main shader compilation entry point
@@ -181,13 +169,14 @@ REGISTER_SHIM("kernel32", "MemoryBarrier", (FARPROC)&xwr::Shim_MemoryBarrier);
 REGISTER_SHIM("kernel32", "_ReadWriteBarrier", (FARPROC)&xwr::Shim_ReadWriteBarrier);
 REGISTER_SHIM("kernel32", "VirtualAllocFromApp", (FARPROC)&xwr::Shim_VirtualAllocFromApp);
 REGISTER_SHIM("kernel32", "VirtualProtectFromApp", (FARPROC)&xwr::Shim_VirtualProtectFromApp);
-REGISTER_SHIM("kernel32", "GetUserNameW", (FARPROC)&xwr::Shim_GetUserNameW);
+// NOTE: kernel32/kernelbase GetUserNameW registrations intentionally
+// omitted — Shim_GetUserNameW is defined and registered (under "advapi32")
+// in shims/advapi32/Advapi32Shim.cpp.
 REGISTER_SHIM("kernelbase", "YieldProcessor", (FARPROC)&xwr::Shim_YieldProcessor);
 REGISTER_SHIM("kernelbase", "MemoryBarrier", (FARPROC)&xwr::Shim_MemoryBarrier);
 REGISTER_SHIM("kernelbase", "_ReadWriteBarrier", (FARPROC)&xwr::Shim_ReadWriteBarrier);
 REGISTER_SHIM("kernelbase", "VirtualAllocFromApp", (FARPROC)&xwr::Shim_VirtualAllocFromApp);
 REGISTER_SHIM("kernelbase", "VirtualProtectFromApp", (FARPROC)&xwr::Shim_VirtualProtectFromApp);
-REGISTER_SHIM("kernelbase", "GetUserNameW", (FARPROC)&xwr::Shim_GetUserNameW);
 
 // d3dcompiler_47
 REGISTER_SHIM("d3dcompiler_47", "D3DCompile", (FARPROC)&xwr::Shim_D3DCompile);
