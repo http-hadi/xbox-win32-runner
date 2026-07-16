@@ -4417,6 +4417,7 @@ typedef BOOL (WINAPI *TIMEFMT_ENUMPROCW)(LPWSTR);
 typedef BOOL (WINAPI *GEO_ENUMPROC)(GEOID);
 typedef void* LPNLSVERINFO;
 typedef struct _NLSVERSIONINFOEX { DWORD dwNLSVersionInfoSize; DWORD dwNLSVersion; DWORD dwDefinedVersion; DWORD dwEffectiveId; GUID guidCustomVersion; } NLSVERSIONINFOEX, *LPNLSVERSIONINFOEX;
+typedef NLSVERSIONINFOEX NLSVERSIONINFO, *LPNLSVERSIONINFO;
 
 // Time types.
 typedef struct _SYSTEMTIME { WORD wYear; WORD wMonth; WORD wDayOfWeek; WORD wDay; WORD wHour; WORD wMinute; WORD wSecond; WORD wMilliseconds; } SYSTEMTIME, *LPSYSTEMTIME;
