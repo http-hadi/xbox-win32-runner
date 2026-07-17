@@ -37,7 +37,28 @@ jobs:
           $cert = New-SelfSignedCertificate -Type CodeSigningCert -Subject "CN=XboxWin32RunnerTest" -KeyUsage DigitalSignature -FriendlyName "Xbox Win32 Runner Test Cert" -CertStoreLocation "Cert:\CurrentUser\My" -KeyExportPolicy Exportable -KeyAlgorithm RSA -KeyLength 2048 -NotAfter (Get-Date).AddYears(1)
           $pwd = ConvertTo-SecureString -String "Test1234!" -Force -AsPlainText
           Export-PfxCertificate -Cert $cert -FilePath "XboxWin32RunnerTest.pfx" -Password $pwd
-          Write-Host "Certificate created: $($cert.Thumbprint)"
+          # Also export the .cer for trust
+          Export-Certificate -Cert $cert -FilePath "XboxWin32RunnerTest.cer"
+          # Trust the certificate by importing it to Trusted People
+          Import-Certificate -FilePath "XboxWin32RunnerTest.cer" -CertStoreLocation "Cert:\LocalMachine\TrustedPeople"
+          Write-Host "Certificate created and trusted: $($cert.Thumbprint)"
+          
+          # Update the vcxproj to use this certificate
+          $vcxproj = Get-Content "XboxWin32Runner.vcxproj" -Raw
+          $vcxproj = $vcxproj -replace '<PackageCertificateKeyFile>.*?</PackageCertificateKeyFile>', "<PackageCertificateKeyFile>XboxWin32RunnerTest.pfx</PackageCertificateKeyFile>"
+          if ($vcxproj -notmatch '<PackageCertificateKeyFile>') {
+            $vcxproj = $vcxproj -replace '</PropertyGroup>', "<PackageCertificateKeyFile>XboxWin32RunnerTest.pfx</PackageCertificateKeyFile>`n  </PropertyGroup>"
+          }
+          $vcxproj = $vcxproj -replace '<PackageCertificateThumbprint>.*?</PackageCertificateThumbprint>', "<PackageCertificateThumbprint>$($cert.Thumbprint)</PackageCertificateThumbprint>"
+          if ($vcxproj -notmatch '<PackageCertificateThumbprint>') {
+            $vcxproj = $vcxproj -replace '</PropertyGroup>', "<PackageCertificateThumbprint>$($cert.Thumbprint)</PackageCertificateThumbprint>`n  </PropertyGroup>"
+          }
+          $vcxproj = $vcxproj -replace '<PackageCertificatePassword>.*?</PackageCertificatePassword>', "<PackageCertificatePassword>Test1234!</PackageCertificatePassword>"
+          if ($vcxproj -notmatch '<PackageCertificatePassword>') {
+            $vcxproj = $vcxproj -replace '</PropertyGroup>', "<PackageCertificatePassword>Test1234!</PackageCertificatePassword>`n  </PropertyGroup>"
+          }
+          Set-Content "XboxWin32Runner.vcxproj" -Value $vcxproj
+          Write-Host "vcxproj updated with certificate"
 
       - name: Create solution file
         shell: pwsh
@@ -128,6 +149,7 @@ jobs:
             uwp-shell/x64/Debug/XboxWin32Runner.appx
             uwp-shell/x64/Debug/XboxWin32Runner.exe
             uwp-shell/AppPackages/
+            uwp-shell/XboxWin32RunnerTest.cer
           if-no-files-found: ignore
 
       - name: Run UWP app in test mode and capture results
