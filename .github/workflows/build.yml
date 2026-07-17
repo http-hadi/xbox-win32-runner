@@ -137,7 +137,7 @@ jobs:
           cd ${{ github.workspace }}
           for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath`) do set VSPATH=%%i
           call "%VSPATH%\VC\Auxiliary\Build\vcvars64.bat"
-          cl /std:c++17 /EHsc /Fe:runtime_test.exe test\runtime_test.cpp /I shims /I winheaders /link kernel32.lib user32.lib advapi32.lib d3d11.lib dxgi.lib xinput.lib ws2_32.lib winmm.lib ole32.lib
+          cl /std:c++17 /EHsc /Fe:runtime_test.exe test\runtime_test.cpp /link kernel32.lib user32.lib advapi32.lib d3d11.lib dxgi.lib xinput.lib ws2_32.lib winmm.lib ole32.lib
           if exist runtime_test.exe (
             echo Runtime test compiled. Running...
             runtime_test.exe
