@@ -130,28 +130,52 @@ jobs:
             uwp-shell/AppPackages/
           if-no-files-found: ignore
 
-      - name: Build and run runtime test
-        shell: cmd
+      - name: Run UWP app in test mode and capture results
+        shell: pwsh
         continue-on-error: true
         run: |
-          cd ${{ github.workspace }}
-          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath`) do set VSPATH=%%i
-          call "%VSPATH%\VC\Auxiliary\Build\vcvars64.bat"
-          cl /std:c++17 /EHsc /Fe:runtime_test.exe test\runtime_test.cpp /link kernel32.lib user32.lib advapi32.lib d3d11.lib dxgi.lib xinput.lib ws2_32.lib winmm.lib ole32.lib onecoreuap.lib
-          if exist runtime_test.exe (
-            echo Runtime test compiled. Running...
-            runtime_test.exe
-          ) else (
-            echo Failed to compile runtime test
-          )
+          # Install the appx and run it in test mode
+          # The appx is in AppPackages/
+          $appxDir = Get-ChildItem -Path "uwp-shell\AppPackages" -Recurse -Filter "*.msix" | Select-Object -First 1
+          if ($appxDir) {
+            Write-Host "Found MSIX: $($appxDir.FullName)"
+            # Install it
+            Add-AppxPackage -Path $appxDir.FullName -ForceApplicationShutdown
+            Write-Host "Package installed"
+            
+            # Wait a moment for the app to launch (UWP apps auto-launch on install
+            # if they have a startup task, but we need to launch it manually)
+            Start-Process -FilePath "explorer.exe" -ArgumentList "shell:AppsFolder\Zai.XboxWin32Runner_!App"
+            Write-Host "App launched"
+            
+            # Wait for the app to finish writing test results
+            Start-Sleep -Seconds 10
+            
+            # Find the LocalState folder
+            $pkgPath = (Get-AppxPackage -Name "*XboxWin32Runner*").PackageFamilyName
+            $localState = "$env:LOCALAPPDATA\Packages\$pkgPath\LocalState"
+            Write-Host "Looking for results in: $localState"
+            
+            if (Test-Path "$localState\shim_test_results.txt") {
+              Write-Host "=== SHIM TEST RESULTS ==="
+              Get-Content "$localState\shim_test_results.txt"
+              Copy-Item "$localState\shim_test_results.txt" -Destination "shim_test_results.txt"
+            } else {
+              Write-Host "No shim_test_results.txt found — app may have crashed"
+              # Check if there's any file in LocalState
+              if (Test-Path $localState) {
+                Write-Host "Files in LocalState:"
+                Get-ChildItem $localState -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "  $($_.Name)" }
+              }
+            }
+          } else {
+            Write-Host "No MSIX found"
+          }
 
-      - name: Upload runtime test results
+      - name: Upload shim test results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: runtime-test-results
-          path: |
-            runtime_test_results.txt
-            runtime_test_output.txt
-            runtime_test_build.log
+          name: shim-test-results
+          path: shim_test_results.txt
           if-no-files-found: ignore

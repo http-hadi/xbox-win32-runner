@@ -43,6 +43,9 @@ public:
     // message pump on the calling thread until WM_QUIT.
     int Run();
 
+    // Run shim tests inside the UWP sandbox and write results to LocalState.
+    void RunTestMode();
+
     // XInput polling thread context (public so the thread function can access it).
     struct XInputPollCtx {
         std::atomic<bool> stop{false};

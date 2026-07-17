@@ -181,6 +181,16 @@ int App::Main() {
     if (!app.LoadConfig(cfg)) {
         return 1;
     }
+
+    // Check if we're in test mode
+    if (app.m_cmdLine.find(L"test") != std::wstring::npos ||
+        app.m_exePath == L"test") {
+        // Run shim tests inside the UWP sandbox
+        app.Initialize();
+        app.RunTestMode();
+        return 0;
+    }
+
     if (!app.Initialize()) {
         return 2;
     }
@@ -200,8 +210,13 @@ bool App::LoadConfig(const std::wstring& configPath) {
         else if (p.key == L"cwd")             m_workingDir     = p.value;
         else if (p.key == L"args")            m_cmdLine        = p.value;
         else if (p.key == L"dll_search_path") m_dllSearchPath  = p.value;
+        else if (p.key == L"mode")            m_cmdLine       += L" " + p.value; // mode=test → args contains "test"
     }
-    return !m_exePath.empty();
+    // In test mode, exe can be empty
+    if (m_exePath.empty() && m_cmdLine.find(L"test") == std::wstring::npos) {
+        return false;
+    }
+    return true;
 }
 
 // ---------------------------------------------------------------------------

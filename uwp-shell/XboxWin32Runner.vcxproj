@@ -132,6 +132,7 @@
     <!-- UWP shell -->
     <ClCompile Include="main.cpp" />
     <ClCompile Include="App.cpp" />
+    <ClCompile Include="test_mode.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\pe-loader\PeLoader.h" />
