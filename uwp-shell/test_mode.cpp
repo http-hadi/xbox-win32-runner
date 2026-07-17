@@ -19,7 +19,6 @@
 #include <chrono>
 #include <string>
 #include <thread>
-#include <fstream>
 #include <sstream>
 
 #ifndef SUCCEEDED
@@ -277,15 +276,21 @@ void App::RunTestMode() {
         g_results << L"  Success rate: " << (100.0 * g_pass / total) << L"%\r\n";
     }
 
-    // Write results to a file in the current directory (LocalState)
-    std::wofstream out("shim_test_results.txt");
-    if (out) {
-        out << g_results.str();
-        out.close();
+    // Write results using Win32 file I/O (more reliable than std::ofstream in AppContainer)
+    std::wstring resultsStr = g_results.str();
+    HANDLE hFile = CreateFileW(L"shim_test_results.txt", GENERIC_WRITE, 0, nullptr,
+                               CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (hFile != INVALID_HANDLE_VALUE) {
+        // Write UTF-16 BOM first
+        WORD bom = 0xFEFF;
+        DWORD written;
+        WriteFile(hFile, &bom, sizeof(bom), &written, nullptr);
+        WriteFile(hFile, (LPCVOID)resultsStr.c_str(), (DWORD)(resultsStr.size() * sizeof(wchar_t)), &written, nullptr);
+        CloseHandle(hFile);
     }
 
-    // Also write to stdout for CI capture
-    OutputDebugStringW(g_results.str().c_str());
+    // Also output via debug string
+    OutputDebugStringW(resultsStr.c_str());
 }
 
 }  // namespace xwr

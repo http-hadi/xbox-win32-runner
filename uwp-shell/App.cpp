@@ -187,8 +187,11 @@ int App::Main() {
     // Check if we're in test mode
     if (app.m_cmdLine.find(L"test") != std::wstring::npos ||
         app.m_exePath == L"test") {
-        // Run shim tests inside the UWP sandbox
-        app.Initialize();
+        // Run shim tests — no CoreWindow/D3D11 needed.
+        // Just touch ShimRegistry and PathTranslator, then run tests.
+        (void)ShimRegistry::Instance();
+        auto& pathTx = PathTranslator::Instance();
+        pathTx.SetPhysicalRoot(L".");
         app.RunTestMode();
         return 0;
     }
