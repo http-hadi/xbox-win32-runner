@@ -179,7 +179,9 @@ int App::Main() {
         }
     }
     if (!app.LoadConfig(cfg)) {
-        return 1;
+        // run.config not found — default to test mode
+        // This happens when the .msix doesn't contain run.config
+        app.m_cmdLine = L"test";
     }
 
     // Check if we're in test mode
