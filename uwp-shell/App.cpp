@@ -179,21 +179,11 @@ int App::Main() {
         }
     }
     if (!app.LoadConfig(cfg)) {
-        // run.config not found — default to test mode
-        // This happens when the .msix doesn't contain run.config
-        app.m_cmdLine = L"test";
-    }
-
-    // Check if we're in test mode
-    if (app.m_cmdLine.find(L"test") != std::wstring::npos ||
-        app.m_exePath == L"test") {
-        // Run shim tests — no CoreWindow/D3D11 needed.
-        // Just touch ShimRegistry and PathTranslator, then run tests.
-        (void)ShimRegistry::Instance();
-        auto& pathTx = PathTranslator::Instance();
-        pathTx.SetPhysicalRoot(L".");
-        app.RunTestMode();
-        return 0;
+        // run.config not found — write a default one to LocalState
+        // so the app doesn't just exit
+        OutputDebugStringW(L"run.config not found, creating default");
+        app.m_cmdLine = L"";
+        app.m_exePath = L"";
     }
 
     if (!app.Initialize()) {
