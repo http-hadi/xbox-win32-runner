@@ -34,28 +34,46 @@ jobs:
         shell: pwsh
         run: |
           cd ${{ github.workspace }}\uwp-shell
-          $cert = New-SelfSignedCertificate -Type CodeSigningCert -Subject "CN=XboxWin32RunnerTest" -KeyUsage DigitalSignature -FriendlyName "Xbox Win32 Runner Test Cert" -CertStoreLocation "Cert:\CurrentUser\My" -KeyExportPolicy Exportable -KeyAlgorithm RSA -KeyLength 2048 -NotAfter (Get-Date).AddYears(1)
+          # Create a self-signed cert with ALL required extensions for code signing
+          # UWP requires: Basic Constraints (CA=false), Key Usage (DigitalSignature),
+          # Extended Key Usage (Code Signing), and Subject Key Identifier
+          $cert = New-SelfSignedCertificate `
+            -Type Custom `
+            -Subject "CN=XboxWin32RunnerTest" `
+            -KeyUsage DigitalSignature `
+            -KeyUsageProperty Sign `
+            -FriendlyName "Xbox Win32 Runner Test Cert" `
+            -CertStoreLocation "Cert:\CurrentUser\My" `
+            -KeyExportPolicy Exportable `
+            -KeyAlgorithm RSA `
+            -KeyLength 2048 `
+            -NotAfter (Get-Date).AddYears(1) `
+            -TextExtension @("2.5.29.19={text}false","2.5.29.37={text}1.3.6.1.5.5.7.3.3","2.5.29.14={text}")
+          
           $pwd = ConvertTo-SecureString -String "Test1234!" -Force -AsPlainText
           Export-PfxCertificate -Cert $cert -FilePath "XboxWin32RunnerTest.pfx" -Password $pwd
-          # Also export the .cer for trust
           Export-Certificate -Cert $cert -FilePath "XboxWin32RunnerTest.cer"
-          # Trust the certificate by importing it to Trusted People
+          
+          # Trust the certificate
           Import-Certificate -FilePath "XboxWin32RunnerTest.cer" -CertStoreLocation "Cert:\LocalMachine\TrustedPeople"
           Write-Host "Certificate created and trusted: $($cert.Thumbprint)"
           
           # Update the vcxproj to use this certificate
           $vcxproj = Get-Content "XboxWin32Runner.vcxproj" -Raw
-          $vcxproj = $vcxproj -replace '<PackageCertificateKeyFile>.*?</PackageCertificateKeyFile>', "<PackageCertificateKeyFile>XboxWin32RunnerTest.pfx</PackageCertificateKeyFile>"
-          if ($vcxproj -notmatch '<PackageCertificateKeyFile>') {
-            $vcxproj = $vcxproj -replace '</PropertyGroup>', "<PackageCertificateKeyFile>XboxWin32RunnerTest.pfx</PackageCertificateKeyFile>`n  </PropertyGroup>"
+          if ($vcxproj -match '<PackageCertificateKeyFile>') {
+            $vcxproj = $vcxproj -replace '<PackageCertificateKeyFile>.*?</PackageCertificateKeyFile>', "<PackageCertificateKeyFile>XboxWin32RunnerTest.pfx</PackageCertificateKeyFile>"
+          } else {
+            $vcxproj = $vcxproj -replace '</PropertyGroup>', "  <PackageCertificateKeyFile>XboxWin32RunnerTest.pfx</PackageCertificateKeyFile>`n  </PropertyGroup>"
           }
-          $vcxproj = $vcxproj -replace '<PackageCertificateThumbprint>.*?</PackageCertificateThumbprint>', "<PackageCertificateThumbprint>$($cert.Thumbprint)</PackageCertificateThumbprint>"
-          if ($vcxproj -notmatch '<PackageCertificateThumbprint>') {
-            $vcxproj = $vcxproj -replace '</PropertyGroup>', "<PackageCertificateThumbprint>$($cert.Thumbprint)</PackageCertificateThumbprint>`n  </PropertyGroup>"
+          if ($vcxproj -match '<PackageCertificateThumbprint>') {
+            $vcxproj = $vcxproj -replace '<PackageCertificateThumbprint>.*?</PackageCertificateThumbprint>', "<PackageCertificateThumbprint>$($cert.Thumbprint)</PackageCertificateThumbprint>"
+          } else {
+            $vcxproj = $vcxproj -replace '</PropertyGroup>', "  <PackageCertificateThumbprint>$($cert.Thumbprint)</PackageCertificateThumbprint>`n  </PropertyGroup>"
           }
-          $vcxproj = $vcxproj -replace '<PackageCertificatePassword>.*?</PackageCertificatePassword>', "<PackageCertificatePassword>Test1234!</PackageCertificatePassword>"
-          if ($vcxproj -notmatch '<PackageCertificatePassword>') {
-            $vcxproj = $vcxproj -replace '</PropertyGroup>', "<PackageCertificatePassword>Test1234!</PackageCertificatePassword>`n  </PropertyGroup>"
+          if ($vcxproj -match '<PackageCertificatePassword>') {
+            $vcxproj = $vcxproj -replace '<PackageCertificatePassword>.*?</PackageCertificatePassword>', "<PackageCertificatePassword>Test1234!</PackageCertificatePassword>"
+          } else {
+            $vcxproj = $vcxproj -replace '</PropertyGroup>', "  <PackageCertificatePassword>Test1234!</PackageCertificatePassword>`n  </PropertyGroup>"
           }
           Set-Content "XboxWin32Runner.vcxproj" -Value $vcxproj
           Write-Host "vcxproj updated with certificate"
