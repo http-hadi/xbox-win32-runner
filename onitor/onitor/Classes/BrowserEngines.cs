@@ -256,7 +256,7 @@ namespace onitor.Classes
         private BrowserSettings _settings;
 
         // ====================================================================
-        // WebGPU / WebNN enablement + Xbox GPU strategy (v1.3.0.0)
+        // WebGPU / WebNN enablement + Xbox GPU strategy (v1.4.0.0)
         // ====================================================================
         // WebView2 does not expose edge://flags or chrome://flags (internal
         // browser pages are disabled in embedded contexts), so Chromium
@@ -276,40 +276,39 @@ namespace onitor.Classes
         //                            prototype name: WebNNAPI) - unknown
         //                            feature names are ignored safely.
         //
-        // Xbox GPU mode (default on first launch):
-        //   --use-webgpu-adapter=d3d11 : REAL GPU WebGPU. Dawn (Chromium's
-        //                            WebGPU stack) has no Xbox-capable D3D12
-        //                            path, but its D3D11 backend is compiled
-        //                            into every Windows build (Dawn default:
-        //                            dawn_enable_d3d11 = is_win) and D3D11 is
-        //                            the one 3D API that IS fully available
-        //                            to UWP apps on the console - the same
-        //                            API ANGLE uses for WebGL. The switch is
-        //                            parsed by Chromium itself (service_utils
-        //                            .cc: "d3d11" -> kD3D11) and forces the
-        //                            WebGPU backend to D3D11.
-        //   --use-angle=d3d11       : keep ANGLE (WebGL/compositing) on the
-        //                            same D3D11 hardware device; Chromium
-        //                            matches the WebGPU adapter to ANGLE's
-        //                            device LUID on Windows, so both stacks
-        //                            share the console GPU.
-        //   --ignore-gpu-blocklist  : the Xbox GPU is not in Chromium's known
-        //                            device list; without this Chromium
-        //                            software-renders everything.
-        //   --enable-unsafe-swiftshader : WebGL/software fallback stays legal.
-        //
-        // Xbox CPU mode (auto-selected fallback, webgpu-mode.txt = "cpu"):
-        //   --use-webgpu-adapter=swiftshader : guaranteed software WebGPU
-        //                            adapter; models load and run on the CPU.
+        // HARDWARE LADDER (Xbox only, persisted in webgpu-mode.txt):
+        //   rung 1  "auto-d3d11" : --use-webgpu-adapter=d3d11 - force the
+        //            Dawn D3D11 backend. D3D11 is the one 3D API that IS
+        //            fully available to UWP apps on the console (the same
+        //            API ANGLE uses for WebGL), so this is the most
+        //            promising hardware path. Verified against Chromium's
+        //            own switch parser: service_utils.cc maps "d3d11" ->
+        //            WebGPUAdapterName::kD3D11.
+        //   rung 2  "auto-d3d12" : Chromium's default Windows backend (Dawn
+        //            D3D12). Historically no adapters were enumerated on
+        //            Xbox, but it is cheap to try before giving up: newer
+        //            runtimes / Series X|S consoles may expose it.
+        //   rung 3  "auto-cpu"   : --use-webgpu-adapter=swiftshader - last
+        //            resort, guarantees a software adapter so WebGPU pages
+        //            (webml.ai etc.) always work, just CPU-driven.
         //
         // ADAPTIVE STARTUP: browser flags only apply at process start, so
         // the engine probes the live browser after startup (requestAdapter
-        // from the first page). If GPU mode yields no adapter on this
-        // console, the app flips <LocalState>\webgpu-mode.txt to "cpu" and
-        // restarts itself ONCE, so WebGPU is always available in the end.
-        // Deleting that file (or setting it to "gpu") retries the hardware
-        // path - no rebuild needed. Everything the engine decides is written
-        // to <LocalState>\webgpu-status.txt (readable in Xbox Device Portal).
+        // from the first page, reporting gpu:<adapter>/fallback:<adapter>/
+        // null/none/error). While a hardware rung yields no HARDWARE adapter
+        // the ladder advances (d3d11 -> d3d12 -> cpu) and the app restarts
+        // itself once per rung, so the best available backend always wins
+        // in the end. IMPORTANT: GPUAdapter.isFallbackAdapter was renamed to
+        // isFallback (Chrome ~119) - the probe checks BOTH, otherwise a
+        // SwiftShader fallback adapter gets misreported as hardware (this
+        // exact bug made v1.3.0.0 silently accept SwiftShader).
+        //
+        // User control via <LocalState>\webgpu-mode.txt (Device Portal):
+        //   "auto" (or delete the file) - restart the ladder at rung 1
+        //   "d3d11" / "d3d12" - pin a backend forever (never auto-advanced)
+        //   "auto-cpu" - stay on SwiftShader
+        // Every decision is written to <LocalState>\webgpu-status.txt and
+        // Chromium's own diagnostics go to <LocalState>\chromium.log.
         //
         // Power-user override: if <LocalState>\browser-flags.txt exists and
         // is non-empty, its complete content is used verbatim as the browser
@@ -323,8 +322,11 @@ namespace onitor.Classes
         private const string BaseGpuFeatureBrowserArguments =
             "--enable-unsafe-webgpu --enable-features=WebGPU,msWebNN,WebNNAPI";
 
-        private const string XboxGpuBrowserArguments =
+        private const string XboxD3D11BrowserArguments =
             "--use-webgpu-adapter=d3d11 --use-angle=d3d11 --ignore-gpu-blocklist --enable-unsafe-swiftshader";
+
+        private const string XboxD3D12BrowserArguments =
+            "--use-angle=d3d11 --ignore-gpu-blocklist --enable-unsafe-swiftshader";
 
         private const string XboxCpuBrowserArguments =
             "--use-webgpu-adapter=swiftshader --ignore-gpu-blocklist --enable-unsafe-swiftshader";
@@ -332,6 +334,145 @@ namespace onitor.Classes
         private const string FlagsOverrideFileName = "browser-flags.txt";
         private const string ModeFileName = "webgpu-mode.txt";
         private const string StatusFileName = "webgpu-status.txt";
+
+        /// <summary>
+        /// Persisted WebGPU strategy (webgpu-mode.txt). "auto-*" values are
+        /// managed by the adaptive ladder; "d3d11"/"d3d12" pin a backend
+        /// forever (user choice, never auto-advanced). Unknown/legacy values
+        /// (incl. the bare "cpu"/"gpu" written by v1.3.0.0) restart the
+        /// ladder so upgraded consoles retry hardware automatically.
+        /// </summary>
+        private enum WebGpuMode
+        {
+            FreshAuto,    // no / unknown file -> launch rung 1 (d3d11)
+            AutoD3D11,    // ladder rung 1 running
+            AutoD3D12,    // ladder rung 2 running
+            AutoCpu,      // ladder settled on SwiftShader
+            PinnedD3D11,  // user pinned rung 1 - never auto-advance
+            PinnedD3D12   // user pinned rung 2 - never auto-advance
+        }
+
+        // --------------------------------------------------------------------
+        // On-page WebGPU status badge (v1.4.0.0). Injected into every page
+        // BEFORE its own scripts run (AddScriptToExecuteOnDocumentCreated),
+        // top frame only. Shows at a glance in the TOP-RIGHT CORNER:
+        //   green  "WebGPU: hardware \u2713"        - running on the console GPU
+        //   amber  "WebGPU: software \u00b7 SwiftShader" - CPU fallback active
+        //   red    "WebGPU: unavailable" / "not enabled"
+        // plus the WebGL renderer as a dim second line (hardware vs software
+        // GL is the key diagnostic for whether the console GPU stack works
+        // at all). Pure CSSOM styling (element.style properties, no style
+        // attributes or <style> tags) so strict-CSP sites cannot block it;
+        // pointer-events: none so it never intercepts input; hides itself
+        // while a video is fullscreen.
+        // --------------------------------------------------------------------
+        private const string WebGpuBadgeScript = @"
+(function () {
+  'use strict';
+  try {
+    if (window.top !== window.self) return;
+    if (window.__onitorWgpuBadge) return;
+    window.__onitorWgpuBadge = true;
+
+    var box = document.createElement('div');
+    var s = box.style;
+    s.position = 'fixed';
+    s.top = '8px';
+    s.right = '8px';
+    s.zIndex = '2147483647';
+    s.padding = '5px 10px';
+    s.borderRadius = '9px';
+    s.font = '600 12px/1.45 system-ui, sans-serif';
+    s.color = '#e8eaf0';
+    s.background = 'rgba(18,20,26,0.82)';
+    s.border = '1px solid rgba(255,255,255,0.25)';
+    s.pointerEvents = 'none';
+    s.whiteSpace = 'nowrap';
+    s.textShadow = '0 1px 2px rgba(0,0,0,0.85)';
+    s.maxWidth = '48vw';
+    s.overflow = 'hidden';
+    s.textOverflow = 'ellipsis';
+
+    var l1 = document.createElement('div');
+    l1.textContent = 'WebGPU: checking...';
+    var l2 = document.createElement('div');
+    var s2 = l2.style;
+    s2.fontSize = '10px';
+    s2.fontWeight = '400';
+    s2.opacity = '0.72';
+    s2.whiteSpace = 'nowrap';
+    s2.overflow = 'hidden';
+    s2.textOverflow = 'ellipsis';
+    box.appendChild(l1);
+    box.appendChild(l2);
+
+    function mount() {
+      (document.body || document.documentElement).appendChild(box);
+    }
+    if (document.body) { mount(); }
+    else { document.addEventListener('DOMContentLoaded', mount, { once: true }); }
+
+    function paint(state, text, sub) {
+      l1.textContent = text;
+      l2.textContent = sub || '';
+      var c = state === 'ok' ? '#34d27b' : (state === 'soft' ? '#f5b93d' : (state === 'bad' ? '#ff6b6b' : '#9aa3af'));
+      s.borderColor = c;
+      l1.style.color = c;
+    }
+
+    function webglLine() {
+      try {
+        var cv = document.createElement('canvas');
+        var gl = cv.getContext('webgl2') || cv.getContext('webgl');
+        if (!gl) return 'WebGL: unavailable';
+        var r = '';
+        try {
+          var ext = gl.getExtension('WEBGL_debug_renderer_info');
+          if (ext) r = String(gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) || '');
+        } catch (e) {}
+        if (!r) return 'WebGL: active (renderer info masked)';
+        var soft = /swiftshader|software|llvmpipe|basic render/i.test(r);
+        return 'WebGL: ' + (soft ? 'software' : 'hardware') + ' \u00b7 ' + r;
+      } catch (e) { return ''; }
+    }
+
+    if (!navigator.gpu) {
+      paint('bad', 'WebGPU: not enabled', webglLine());
+      return;
+    }
+
+    var gl2 = webglLine();
+    navigator.gpu.requestAdapter().then(function (a) {
+      if (!a) { paint('bad', 'WebGPU: unavailable', gl2); return; }
+      var fb = false;
+      var d = '';
+      try { fb = !!(a.isFallback || a.isFallbackAdapter); } catch (e) {}
+      try {
+        var i = a.info || {};
+        d = i.description || i.architecture || '';
+        if (!d && typeof a.requestAdapterInfo === 'function') {
+          var ri = a.requestAdapterInfo();
+          if (ri) d = ri.description || ri.architecture || '';
+        }
+      } catch (e) {}
+      if (d) d = String(d);
+      if (d.length > 46) d = d.slice(0, 45) + '\u2026';
+      if (fb) {
+        paint('soft', 'WebGPU: software \u00b7 SwiftShader',
+          (d ? 'adapter: ' + d : '') + (gl2 ? (d ? ' \u00b7 ' : '') + gl2 : ''));
+      } else {
+        paint('ok', 'WebGPU: hardware \u2713',
+          (d ? 'adapter: ' + d : 'adapter: GPU') + (gl2 ? ' \u00b7 ' + gl2 : ''));
+      }
+    }, function () {
+      paint('bad', 'WebGPU: error', gl2);
+    });
+
+    document.addEventListener('fullscreenchange', function () {
+      box.style.display = document.fullscreenElement ? 'none' : '';
+    });
+  } catch (e) { /* never break the page */ }
+})();";
 
         private static bool _webgpuProbeStarted;
         private static bool _restartedForFallback;
@@ -389,14 +530,43 @@ namespace onitor.Classes
                 Debug.WriteLine("[Onitor] Could not read " + FlagsOverrideFileName + ": " + ex.Message);
             }
 
-            // 2) Computed defaults: hardware D3D11 WebGPU attempt on Xbox,
-            //    plain hardware WebGPU everywhere else.
+            // 2) Computed defaults: hardware WebGPU ladder on Xbox, plain
+            //    hardware WebGPU everywhere else.
             string args = BaseGpuFeatureBrowserArguments;
             if (IsXboxDevice())
             {
-                args += " " + (IsGpuWebGpuMode()
-                    ? XboxGpuBrowserArguments
-                    : XboxCpuBrowserArguments);
+                WebGpuMode mode = ReadWebGpuMode();
+                if (mode == WebGpuMode.FreshAuto)
+                {
+                    // Fresh ladder: start at rung 1 and persist the rung so
+                    // the startup probe knows which backend this process is
+                    // running (and so v1.3.0.0 leftovers get re-laddered).
+                    mode = WebGpuMode.AutoD3D11;
+                    TrySetWebGpuMode("auto-d3d11");
+                }
+
+                if (mode == WebGpuMode.AutoCpu)
+                {
+                    args += " " + XboxCpuBrowserArguments;
+                }
+                else if (mode == WebGpuMode.AutoD3D12 || mode == WebGpuMode.PinnedD3D12)
+                {
+                    args += " " + XboxD3D12BrowserArguments;
+                }
+                else // AutoD3D11 / PinnedD3D11
+                {
+                    args += " " + XboxD3D11BrowserArguments;
+                }
+
+                // Chromium debug log -> <LocalState>\chromium.log (readable
+                // through the Xbox Device Portal file explorer). Captures
+                // Dawn backend / adapter-initialisation errors, the fastest
+                // way to diagnose why a ladder rung failed.
+                try
+                {
+                    args += " --enable-logging --log-file=" + LocalStatePath("chromium.log");
+                }
+                catch (Exception) { /* keep the flags without logging */ }
             }
             return args;
         }
@@ -420,14 +590,7 @@ namespace onitor.Classes
                 Windows.Storage.ApplicationData.Current.LocalFolder.Path, fileName);
         }
 
-        /// <summary>
-        /// True = attempt hardware (D3D11) WebGPU on Xbox, false = guaranteed
-        /// SwiftShader (CPU) adapter. Persisted in webgpu-mode.txt so it can
-        /// be flipped by the adaptive startup probe AND by the user through
-        /// the Device Portal file explorer. Defaults to true (GPU attempt)
-        /// whenever the file is missing or unreadable.
-        /// </summary>
-        private static bool IsGpuWebGpuMode()
+        private static WebGpuMode ReadWebGpuMode()
         {
             try
             {
@@ -435,28 +598,54 @@ namespace onitor.Classes
                 if (System.IO.File.Exists(path))
                 {
                     string mode = System.IO.File.ReadAllText(path).Trim();
-                    if (string.Equals(mode, "cpu", StringComparison.OrdinalIgnoreCase))
-                    {
-                        return false;
-                    }
+                    if (string.Equals(mode, "auto-d3d11", StringComparison.OrdinalIgnoreCase)) return WebGpuMode.AutoD3D11;
+                    if (string.Equals(mode, "auto-d3d12", StringComparison.OrdinalIgnoreCase)) return WebGpuMode.AutoD3D12;
+                    if (string.Equals(mode, "auto-cpu", StringComparison.OrdinalIgnoreCase)) return WebGpuMode.AutoCpu;
+                    if (string.Equals(mode, "d3d11", StringComparison.OrdinalIgnoreCase)) return WebGpuMode.PinnedD3D11;
+                    if (string.Equals(mode, "d3d12", StringComparison.OrdinalIgnoreCase)) return WebGpuMode.PinnedD3D12;
+                    // Anything else - "auto", legacy v1.3.0.0 values ("gpu" /
+                    // bare "cpu"), garbage - starts a FRESH ladder so every
+                    // upgraded console retries hardware automatically.
                 }
             }
             catch (Exception ex)
             {
                 Debug.WriteLine("[Onitor] Could not read " + ModeFileName + ": " + ex.Message);
             }
-            return true;
+            return WebGpuMode.FreshAuto;
         }
 
-        private static void SetWebGpuMode(string mode)
+        /// <summary>
+        /// Persist a ladder value and verify it landed (read-back). The
+        /// verification matters: the ladder only restarts the app after a
+        /// CONFIRMED mode change, which rules out restart loops if the file
+        /// system misbehaves.
+        /// </summary>
+        private static bool TrySetWebGpuMode(string value)
         {
             try
             {
-                System.IO.File.WriteAllText(LocalStatePath(ModeFileName), mode);
+                System.IO.File.WriteAllText(LocalStatePath(ModeFileName), value);
+                string readBack = System.IO.File.ReadAllText(LocalStatePath(ModeFileName)).Trim();
+                return string.Equals(readBack, value, StringComparison.OrdinalIgnoreCase);
             }
             catch (Exception ex)
             {
                 Debug.WriteLine("[Onitor] Could not write " + ModeFileName + ": " + ex.Message);
+                return false;
+            }
+        }
+
+        private static string ModeName(WebGpuMode mode)
+        {
+            switch (mode)
+            {
+                case WebGpuMode.AutoD3D11: return "auto-d3d11";
+                case WebGpuMode.AutoD3D12: return "auto-d3d12";
+                case WebGpuMode.AutoCpu: return "auto-cpu";
+                case WebGpuMode.PinnedD3D11: return "d3d11 (pinned)";
+                case WebGpuMode.PinnedD3D12: return "d3d12 (pinned)";
+                default: return "fresh-auto";
             }
         }
 
@@ -521,6 +710,18 @@ namespace onitor.Classes
                 catch (Exception ex)
                 {
                     Debug.WriteLine("[Onitor] SetVirtualHostNameToFolderMapping failed: " + ex.Message);
+                }
+
+                // WebGPU status badge (v1.4.0.0): the small top-right pill
+                // on every page (see WebGpuBadgeScript). Registered per tab
+                // BEFORE any page script runs.
+                try
+                {
+                    await _core.AddScriptToExecuteOnDocumentCreatedAsync(WebGpuBadgeScript);
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine("[Onitor] Could not install WebGPU badge script: " + ex.Message);
                 }
 
                 ApplySettings();
@@ -711,20 +912,22 @@ namespace onitor.Classes
         }
 
         // --------------------------------------------------------------------
-        // Adaptive WebGPU startup. Browser flags are fixed for the life of the
-        // process, so we verify what the browser actually ended up with by
-        // asking the page for an adapter. Outcomes:
-        //   "gpu"      -> hardware adapter active (D3D11 on Xbox) - done.
-        //   "fallback" -> adapter active but a CPU fallback (WARP/SwiftShader)
-        //                 - WebGPU still works and models load - done.
-        //   "null"     -> no adapter at all. In GPU mode on Xbox this means
-        //                 the D3D11 hardware path failed on this console:
-        //                 flip webgpu-mode.txt to "cpu" and restart ONCE so a
-        //                 SwiftShader adapter is guaranteed. In CPU mode this
-        //                 is a flags problem - logged, not fatal.
-        //   "none"     -> navigator.gpu missing: flags were not applied at all
-        //                 (env var blocked?) - logged only.
-        //   "error"    -> probe raced with navigation - retried next launch.
+        // Adaptive WebGPU startup (v1.4.0.0 ladder). Browser flags are fixed
+        // for the life of the process, so we verify what the browser actually
+        // ended up with by asking the page for an adapter. Probe outcomes:
+        //   "gpu:<desc>"      -> hardware adapter active - ladder done, the
+        //                        current rung is sticky for future launches.
+        //   "fallback:<desc>" -> adapter active but a CPU fallback
+        //                        (SwiftShader). If we are still on a hardware
+        //                        rung of the ladder, ADVANCE and restart once.
+        //   "null"            -> no adapter at all - same ladder advance.
+        //   "none"            -> navigator.gpu missing: flags were not applied
+        //                        at all (env var blocked?) - logged only.
+        //   "error"           -> probe raced with navigation - retried next
+        //                        launch.
+        // Restarts happen at most ONCE per process and only after the mode
+        // file change has been VERIFIED (TrySetWebGpuMode read-back), so the
+        // ladder can never restart-loop.
         // --------------------------------------------------------------------
         private static async void ProbeWebGpuAndAdaptAsync(Mux.WebView2 view)
         {
@@ -734,11 +937,19 @@ namespace onitor.Classes
             {
                 await Task.Delay(2500); // let the first page settle
 
+                // GPUAdapter.isFallbackAdapter was renamed to isFallback
+                // around Chrome 119 - check BOTH, or a SwiftShader fallback
+                // gets misreported as hardware (the v1.3.0.0 bug).
                 string probeJs =
                     "(function(){" +
                     "  if (!navigator.gpu) return 'none';" +
                     "  try { return navigator.gpu.requestAdapter().then(" +
-                    "    function(a){ return a ? (a.isFallbackAdapter ? 'fallback' : 'gpu') : 'null'; }," +
+                    "    function(a){" +
+                    "      if (!a) return 'null';" +
+                    "      var fb=false; try { fb = !!(a.isFallback || a.isFallbackAdapter); } catch(e){}" +
+                    "      var d=''; try { var i=a.info||{}; d=i.description||i.architecture||''; } catch(e){}" +
+                    "      return (fb?'fallback:':'gpu:') + String(d).slice(0,90);" +
+                    "    }," +
                     "    function(){ return 'error'; });" +
                     "  } catch (e) { return 'error'; }" +
                     "})()";
@@ -746,53 +957,72 @@ namespace onitor.Classes
                 string raw = await view.ExecuteScriptAsync(probeJs);
                 string result = NormalizeScriptResult(raw);
 
-                bool gpuMode = IsGpuWebGpuMode();
+                string kind = result ?? string.Empty;
+                string desc = string.Empty;
+                int split = kind.IndexOf(':');
+                if (split > 0)
+                {
+                    desc = kind.Substring(split + 1);
+                    kind = kind.Substring(0, split);
+                }
+                if (kind.Length == 0) kind = "inconclusive";
+
+                WebGpuMode mode = ReadWebGpuMode();
+                if (mode == WebGpuMode.FreshAuto) mode = WebGpuMode.AutoD3D11; // fresh always launches rung 1
                 bool isXbox = IsXboxDevice();
 
-                Debug.WriteLine("[Onitor] WebGPU probe: " + (result ?? "(no result)") +
-                    " (mode=" + (gpuMode ? "gpu" : "cpu") + ")");
-                AppendWebGpuStatus("probe result=" + (result ?? "inconclusive") +
-                    " mode=" + (gpuMode ? "gpu(d3d11)" : "cpu(swiftshader)") +
-                    " xbox=" + isXbox);
+                Debug.WriteLine("[Onitor] WebGPU probe: " + kind + " ('" + desc + "') mode=" + ModeName(mode));
+                AppendWebGpuStatus("probe result=" + kind +
+                    (desc.Length > 0 ? " adapter='" + desc + "'" : string.Empty) +
+                    " mode=" + ModeName(mode) + " xbox=" + isXbox);
 
-                if (string.IsNullOrEmpty(result))
+                if (kind == "gpu")
                 {
-                    AppendWebGpuStatus("probe inconclusive (navigation race) - will retry next launch.");
+                    AppendWebGpuStatus("Hardware WebGPU adapter ACTIVE ('" + desc + "') - running on the console GPU.");
                     return;
                 }
 
-                if (result == "gpu")
+                if (kind == "fallback" || kind == "null")
                 {
-                    AppendWebGpuStatus("Hardware WebGPU adapter is ACTIVE" +
-                        (isXbox ? " (D3D11 backend on the console GPU)." : "."));
+                    // This launch's backend did not produce a hardware
+                    // adapter. Advance the ladder once per rung.
+                    if (isXbox && !_restartedForFallback)
+                    {
+                        string next = null;
+                        if (mode == WebGpuMode.AutoD3D11) next = "auto-d3d12";
+                        else if (mode == WebGpuMode.AutoD3D12) next = "auto-cpu";
+
+                        if (next != null && TrySetWebGpuMode(next))
+                        {
+                            _restartedForFallback = true;
+                            AppendWebGpuStatus("No hardware adapter in " + ModeName(mode) +
+                                " - advancing ladder to " + next + " and restarting once.");
+                            await Windows.ApplicationModel.Core.CoreApplication.RequestRestartAsync("webgpu-ladder");
+                            return;
+                        }
+                    }
+
+                    if (mode == WebGpuMode.AutoCpu)
+                    {
+                        AppendWebGpuStatus(kind == "fallback"
+                            ? "SwiftShader software adapter active (expected in auto-cpu mode)."
+                            : "auto-cpu mode still has no adapter - check browser-flags.txt and chromium.log.");
+                    }
+                    else
+                    {
+                        AppendWebGpuStatus("WebGPU is on a software adapter or unavailable (mode=" + ModeName(mode) +
+                            "). Set webgpu-mode.txt to 'auto' to retry the hardware ladder.");
+                    }
                     return;
                 }
 
-                if (result == "fallback")
-                {
-                    AppendWebGpuStatus("WebGPU running on a software/fallback adapter - models will load (CPU-driven).");
-                    return;
-                }
-
-                if (result == "null" && isXbox && gpuMode && !_restartedForFallback)
-                {
-                    // Hardware D3D11 WebGPU is not available on this console.
-                    // Guarantee a working adapter via SwiftShader and restart
-                    // ONCE so the new flags take effect.
-                    _restartedForFallback = true;
-                    SetWebGpuMode("cpu");
-                    AppendWebGpuStatus("No D3D11 WebGPU adapter on this console - switching to SwiftShader mode and restarting.");
-                    await Windows.ApplicationModel.Core.CoreApplication.RequestRestartAsync("webgpu-fallback");
-                    return;
-                }
-
-                if (result == "null")
-                {
-                    AppendWebGpuStatus("requestAdapter returned null - WebGPU unavailable this session (check browser-flags.txt).");
-                }
-                else if (result == "none")
+                if (kind == "none")
                 {
                     AppendWebGpuStatus("navigator.gpu is missing - WebGPU flags were not applied (WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS blocked?).");
+                }
+                else if (kind == "error" || kind == "inconclusive")
+                {
+                    AppendWebGpuStatus("probe " + kind + " (navigation race) - will retry next launch.");
                 }
             }
             catch (Exception ex)

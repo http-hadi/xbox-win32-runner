@@ -40,7 +40,7 @@ Notes for Xbox:
   Engine Mode = Legacy to use the TV-optimized YouTube interface.
 
 
-WebGPU / WEBNN (AI MODELS IN THE BROWSER) - new in 1.3.0.0
+WebGPU / WEBNN (AI MODELS IN THE BROWSER) - improved in 1.4.0.0
 ----------------------------------------------------------
 WebGPU (and the WebNN feature names) are enabled by default in the
 Chromium engine. WebView2 does not have edge://flags / chrome://flags -
@@ -48,36 +48,58 @@ those internal pages only exist in full browsers - so the equivalent is
 done by the app itself via browser launch arguments, set before the first
 WebView2 environment is created (WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS).
 
+STATUS BADGE (new in 1.4.0.0): every page now shows a small pill in the
+TOP-RIGHT corner telling you at a glance how WebGPU is doing:
+  green  "WebGPU: hardware"        - running on the real console/PC GPU
+  amber  "WebGPU: software - SwiftShader" - CPU fallback active
+  red    "WebGPU: unavailable" / "not enabled"
+The dim second line shows the active adapter name and whether WebGL is
+hardware or software (a good sanity check for the whole GPU stack).
+If a video goes fullscreen the badge hides itself so it never covers
+your video.
+
 What to expect per device:
 - WINDOWS 10/11 DESKTOP: full hardware-accelerated WebGPU through the
   Evergreen WebView2 runtime (your PC's GPU, D3D12). Flags used:
   --enable-unsafe-webgpu --enable-features=WebGPU,msWebNN,WebNNAPI
-- XBOX DEV MODE - GPU MODE (default): Dawn (Chromium's WebGPU stack)
-  has no Xbox D3D12 backend, but its D3D11 backend is compiled into
-  every Windows build and D3D11 IS available to UWP apps on the
-  console (the same API the WebGL/ANGLE layer uses). The app therefore
-  passes  --use-webgpu-adapter=d3d11 --use-angle=d3d11
-  --ignore-gpu-blocklist  to run WebGPU on the REAL console GPU.
-- XBOX DEV MODE - CPU MODE (automatic fallback): if the console
-  cannot provide a D3D11 WebGPU adapter, the app detects this at
-  startup (it asks the browser for an adapter and inspects the
-  answer), writes "cpu" into webgpu-mode.txt, restarts ONCE and
-  comes up with a guaranteed SwiftShader software adapter instead -
-  models then load and run on the CPU (slow but reliable).
+- XBOX DEV MODE - automatic hardware ladder (new in 1.4.0.0): the app
+  tries REAL-GPU backends in order until one works:
+    1) Dawn D3D11 backend (--use-webgpu-adapter=d3d11) - D3D11 is the
+       one 3D API fully available to UWP apps on the console (the same
+       API the WebGL/ANGLE layer uses), so this is the most promising
+       hardware path.
+    2) Dawn D3D12 backend (Chromium's Windows default) - historically
+       no adapters on Xbox, but newer runtimes / Series X|S may expose
+       it, so it gets a chance.
+    3) SwiftShader software adapter (--use-webgpu-adapter=swiftshader)
+       - guaranteed last resort: models load and run on the CPU.
+  At startup the app asks the browser for an adapter; while a hardware
+  rung does not deliver a hardware adapter it advances the ladder and
+  restarts itself once per rung (max 2 restarts, one time ever - the
+  result is remembered in webgpu-mode.txt).
+  NOTE: v1.3.0.0 misread the SwiftShader fallback adapter as "hardware"
+  (Chromium renamed isFallbackAdapter -> isFallback); 1.4.0.0 checks
+  both, which is why sites like webgpucheck.com may now honestly show
+  SwiftShader where 1.3.0.0 claimed hardware.
 
 Every launch is logged to  webgpu-status.txt  in the app's LocalState
-folder (Xbox Device Portal -> File explorer), telling you exactly
-which adapter the browser got: "Hardware WebGPU adapter is ACTIVE"
-means the console GPU is doing the work.
+folder (Xbox Device Portal -> File explorer), telling you exactly which
+adapter the browser got, e.g. "Hardware WebGPU adapter ACTIVE" or
+"probe result=fallback adapter='SwiftShader DLL'". Chromium's own
+diagnostics additionally go to  chromium.log  in the same folder - if
+a hardware rung fails, that file contains the Dawn/adapter error.
 
 WebGPU sites to try:
+  https://webgpucheck.com/               (quick status check - should
+                                          match the badge)
   https://webml.ai/playground          (AI models in the browser)
   https://webgpu.github.io/webgpu-samples/  (samples - the "Hardware Adapter"
      sample shows which adapter is active)
 
-To retry the hardware path after a fallback happened: delete
-webgpu-mode.txt (or set its content to "gpu") in the app's LocalState
-folder via Device Portal, then restart the app.
+To retry the hardware ladder from scratch: delete webgpu-mode.txt (or
+set its content to "auto") in the app's LocalState folder via Device
+Portal, then restart the app. To pin a specific backend forever, set
+the file to "d3d11" or "d3d12"; to stay on SwiftShader use "auto-cpu".
 
 CHANGING FLAGS WITHOUT A REBUILD (power users)
 ----------------------------------------------
@@ -88,8 +110,10 @@ http://<console-ip>:11443 (Device Portal) -> File explorer -> find the
 Onitor app's LocalState folder -> create/edit browser-flags.txt, then
 restart the app. Useful recipes:
 
-  Hardware WebGPU attempt (the new default):
+  Hardware WebGPU, ladder rung 1 (the new default):
     --enable-unsafe-webgpu --use-webgpu-adapter=d3d11 --use-angle=d3d11 --ignore-gpu-blocklist --enable-unsafe-swiftshader
+  Hardware WebGPU, ladder rung 2 (Chromium Windows default backend):
+    --enable-unsafe-webgpu --use-angle=d3d11 --ignore-gpu-blocklist --enable-unsafe-swiftshader
   Guaranteed software WebGPU (old 1.2.0.0 behaviour):
     --enable-unsafe-webgpu --use-webgpu-adapter=swiftshader --enable-unsafe-swiftshader
   Force WebGPU compatibility profile (lighter feature set, more
@@ -167,3 +191,16 @@ WHAT WAS CHANGED vs original Onitor
   available the app auto-falls back to a guaranteed SwiftShader adapter
   (webgpu-mode.txt) and restarts once. All decisions logged to
   webgpu-status.txt. Desktop hardware WebGPU unchanged (D3D12).
+- NEW 1.4.0.0:
+  * On-page WebGPU STATUS BADGE (top-right pill, every page): green =
+    hardware, amber = SwiftShader software, red = unavailable, plus
+    adapter name + WebGL hardware/software as a dim second line.
+  * Automatic HARDWARE LADDER on Xbox: D3D11 backend -> D3D12 backend
+    -> SwiftShader, advancing with one restart per rung until a real
+    GPU adapter is found (result remembered in webgpu-mode.txt).
+  * Fixed v1.3.0.0 misdetection: Chromium renamed
+    GPUAdapter.isFallbackAdapter -> isFallback; the probe now checks
+    both, so a SwiftShader fallback adapter is no longer reported as
+    hardware (why webgpucheck.com showed SwiftShader before).
+  * Chromium diagnostics now go to LocalState\chromium.log
+    (--enable-logging --log-file) for Dawn backend error analysis.
