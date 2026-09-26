@@ -482,7 +482,12 @@ namespace onitor.Classes
                 case Core.CoreWebView2PermissionKind.Notifications:
                     return WebViewPermissionType.WebNotifications;
                 default:
-                    return WebViewPermissionType.Unspecified;
+                    // WebViewPermissionType has no Unspecified/Other member
+                    // (real members: Geolocation, ImmersiveView, Media, PointerLock,
+                    // Screen, UnlimitedIndexedDBQuota, WebNotifications). Screen has
+                    // no case in the app's permission switch, so unmapped WebView2
+                    // permission kinds fall through to WebView2's default handling.
+                    return WebViewPermissionType.Screen;
             }
         }
 
