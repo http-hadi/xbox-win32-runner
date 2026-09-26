@@ -353,7 +353,7 @@ namespace onitor.Classes
 
             _core.NewWindowRequested += (s, e) =>
             {
-                var a = new EngineNewWindowArgs { Uri = e.Uri, Handled = e.Handled };
+                var a = new EngineNewWindowArgs { Uri = FromEngine(e.Uri), Handled = e.Handled };
                 var h = NewWindowRequested; if (h != null) h(a);
                 e.Handled = a.Handled;
             };
@@ -450,6 +450,14 @@ namespace onitor.Classes
             return uri;
         }
 
+        // WinRT WebView2 exposes URIs as strings (CoreWebView2.Source, event args).
+        private Uri FromEngine(string uri)
+        {
+            if (string.IsNullOrEmpty(uri)) return null;
+            try { return FromEngine(new Uri(uri)); }
+            catch (Exception) { return null; }
+        }
+
         private Uri CurrentUri()
         {
             if (_coreReady)
@@ -474,7 +482,7 @@ namespace onitor.Classes
                 case Core.CoreWebView2PermissionKind.Notifications:
                     return WebViewPermissionType.WebNotifications;
                 default:
-                    return WebViewPermissionType.Other;
+                    return WebViewPermissionType.Unspecified;
             }
         }
 
@@ -483,17 +491,17 @@ namespace onitor.Classes
             switch (status)
             {
                 case Core.CoreWebView2WebErrorStatus.CannotConnect: return WebErrorStatus.CannotConnect;
-                case Core.CoreWebView2WebErrorStatus.CertificateCommonNameIsIncorrect: return WebErrorStatus.Unexpected;
-                case Core.CoreWebView2WebErrorStatus.CertificateExpired: return WebErrorStatus.Unexpected;
-                case Core.CoreWebView2WebErrorStatus.CertificateIsInvalid: return WebErrorStatus.Unexpected;
-                case Core.CoreWebView2WebErrorStatus.ConnectionAborted: return WebErrorStatus.Unexpected;
-                case Core.CoreWebView2WebErrorStatus.ConnectionReset: return WebErrorStatus.Unexpected;
+                case Core.CoreWebView2WebErrorStatus.CertificateCommonNameIsIncorrect: return WebErrorStatus.Unknown;
+                case Core.CoreWebView2WebErrorStatus.CertificateExpired: return WebErrorStatus.Unknown;
+                case Core.CoreWebView2WebErrorStatus.CertificateIsInvalid: return WebErrorStatus.Unknown;
+                case Core.CoreWebView2WebErrorStatus.ConnectionAborted: return WebErrorStatus.Unknown;
+                case Core.CoreWebView2WebErrorStatus.ConnectionReset: return WebErrorStatus.Unknown;
                 case Core.CoreWebView2WebErrorStatus.Disconnected: return WebErrorStatus.Disconnected;
                 case Core.CoreWebView2WebErrorStatus.HostNameNotResolved: return WebErrorStatus.HostNameNotResolved;
-                case Core.CoreWebView2WebErrorStatus.OperationCanceled: return WebErrorStatus.Unexpected;
-                case Core.CoreWebView2WebErrorStatus.RedirectFailed: return WebErrorStatus.Unexpected;
+                case Core.CoreWebView2WebErrorStatus.OperationCanceled: return WebErrorStatus.Unknown;
+                case Core.CoreWebView2WebErrorStatus.RedirectFailed: return WebErrorStatus.Unknown;
                 case Core.CoreWebView2WebErrorStatus.Timeout: return WebErrorStatus.Timeout;
-                case Core.CoreWebView2WebErrorStatus.UnexpectedError: return WebErrorStatus.Unexpected;
+                case Core.CoreWebView2WebErrorStatus.UnexpectedError: return WebErrorStatus.Unknown;
                 default: return WebErrorStatus.Unknown;
             }
         }

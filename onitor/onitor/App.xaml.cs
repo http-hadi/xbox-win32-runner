@@ -310,20 +310,12 @@ namespace Onitor
                 Debug.WriteLine("EngineMode: " + GlobalLocalSettings.EngineMode);
 
                 // Xbox (dev mode): web content needs mouse emulation - the
-                // gamepad left stick moves a cursor, A clicks. Without this,
-                // D-pad XY-navigation cannot reach inside the web view.
-                try
-                {
-                    if (AnalyticsInfo.VersionInfo.DeviceFamily == "Windows.Xbox"
-                        && ApiInformation.IsPropertyPresent("Windows.UI.Xaml.Application", "RequiresPointerMode"))
-                    {
-                        this.RequiresPointerMode = ApplicationRequiresPointerMode.WhenPresent;
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Debug.WriteLine("RequiresPointerMode not set: " + ex.Message);
-                }
+                // gamepad left stick moves a cursor, A clicks. UWP apps on
+                // Xbox get mouse emulation by default (ApplicationRequires-
+                // PointerMode.Auto), so nothing is set here; changing to
+                // WhenRequested would DISABLE the mouse unless every page
+                // opts in, which would break browser navigation.
+                Debug.WriteLine("DeviceFamily: " + AnalyticsInfo.VersionInfo.DeviceFamily);
 
                 Debug.WriteLine(GlobalLocalSettings.homePage);
 
