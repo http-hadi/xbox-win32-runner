@@ -256,7 +256,7 @@ namespace onitor.Classes
         private BrowserSettings _settings;
 
         // ====================================================================
-        // WebGPU / WebNN enablement + Xbox GPU strategy (v1.4.0.0)
+        // WebGPU / WebNN enablement + Xbox GPU strategy (v1.5.0.0)
         // ====================================================================
         // WebView2 does not expose edge://flags or chrome://flags (internal
         // browser pages are disabled in embedded contexts), so Chromium
@@ -280,15 +280,23 @@ namespace onitor.Classes
         //   rung 1  "auto-d3d11" : --use-webgpu-adapter=d3d11 - force the
         //            Dawn D3D11 backend. D3D11 is the one 3D API that IS
         //            fully available to UWP apps on the console (the same
-        //            API ANGLE uses for WebGL), so this is the most
-        //            promising hardware path. Verified against Chromium's
+        //            API ANGLE uses for WebGL). Verified against Chromium's
         //            own switch parser: service_utils.cc maps "d3d11" ->
         //            WebGPUAdapterName::kD3D11.
         //   rung 2  "auto-d3d12" : Chromium's default Windows backend (Dawn
         //            D3D12). Historically no adapters were enumerated on
-        //            Xbox, but it is cheap to try before giving up: newer
-        //            runtimes / Series X|S consoles may expose it.
-        //   rung 3  "auto-cpu"   : --use-webgpu-adapter=swiftshader - last
+        //            Xbox, but it is cheap to try before giving up.
+        //   rung 3  "auto-gles"  : --use-webgpu-adapter=opengles - Dawn's
+        //            OpenGLES backend routed through ANGLE's hardware
+        //            D3D11 device (the device WebGL already uses). This is
+        //            the KEY rung: Chromium's webgpu_decoder_impl.cc forces
+        //            the SwiftShader fallback adapter whenever the GPU
+        //            feature list marks ACCELERATED_WEBGPU as software (the
+        //            Xbox GPU is unknown to it) - for every adapter type
+        //            EXCEPT kOpenGLES, which is explicitly exempt from that
+        //            forcing. So GLES is the only route that can hand WebGPU
+        //            a real console GPU on Xbox today.
+        //   rung 4  "auto-cpu"   : --use-webgpu-adapter=swiftshader - last
         //            resort, guarantees a software adapter so WebGPU pages
         //            (webml.ai etc.) always work, just CPU-driven.
         //
@@ -296,16 +304,29 @@ namespace onitor.Classes
         // the engine probes the live browser after startup (requestAdapter
         // from the first page, reporting gpu:<adapter>/fallback:<adapter>/
         // null/none/error). While a hardware rung yields no HARDWARE adapter
-        // the ladder advances (d3d11 -> d3d12 -> cpu) and the app restarts
-        // itself once per rung, so the best available backend always wins
-        // in the end. IMPORTANT: GPUAdapter.isFallbackAdapter was renamed to
-        // isFallback (Chrome ~119) - the probe checks BOTH, otherwise a
-        // SwiftShader fallback adapter gets misreported as hardware (this
-        // exact bug made v1.3.0.0 silently accept SwiftShader).
+        // the ladder advances (d3d11 -> d3d12 -> gles -> cpu) and the app
+        // restarts itself once per rung, so the best available backend
+        // always wins in the end.
+        //
+        // HONEST SOFTWARE DETECTION (v1.5.0.0): an adapter is software if
+        // isFallback/isFallbackAdapter is set OR its description/
+        // architecture/vendor matches SwiftShader/llvmpipe/Basic
+        // Render/WARP. The name check is required because Chromium reports
+        // isFallback=false for an EXPLICITLY requested SwiftShader adapter
+        // (rung 4) - v1.4.0.0 relied on the flag alone and therefore showed
+        // a green "WebGPU: hardware, adapter: SwiftShader" badge.
+        //
+        // LADDER GENERATIONS: webgpu-ladder-gen.txt records which ladder
+        // generation this console last ran (bump CurrentLadderGeneration
+        // whenever a rung is added/moved). On mismatch: a console that had
+        // already settled on "auto-cpu" resumes directly at the first NEW
+        // rung (no re-running of already-failed rungs); anything else
+        // restarts the ladder from rung 1; user pins always survive.
         //
         // User control via <LocalState>\webgpu-mode.txt (Device Portal):
         //   "auto" (or delete the file) - restart the ladder at rung 1
-        //   "d3d11" / "d3d12" - pin a backend forever (never auto-advanced)
+        //   "d3d11" / "d3d12" / "gles" - pin a backend forever (never
+        //   auto-advanced)
         //   "auto-cpu" - stay on SwiftShader
         // Every decision is written to <LocalState>\webgpu-status.txt and
         // Chromium's own diagnostics go to <LocalState>\chromium.log.
@@ -328,12 +349,27 @@ namespace onitor.Classes
         private const string XboxD3D12BrowserArguments =
             "--use-angle=d3d11 --ignore-gpu-blocklist --enable-unsafe-swiftshader";
 
+        // Rung 3: Dawn's OpenGLES backend through ANGLE's hardware D3D11
+        // device - the only adapter type EXEMPT from Chromium's
+        // force_fallback_adapter software override (webgpu_decoder_impl.cc
+        // line ~1231: the forcing applies to every use_webgpu_adapter value
+        // except kOpenGLES), hence the best hardware hope on Xbox.
+        private const string XboxGlesBrowserArguments =
+            "--use-webgpu-adapter=opengles --use-angle=d3d11 --ignore-gpu-blocklist --enable-unsafe-swiftshader";
+
         private const string XboxCpuBrowserArguments =
             "--use-webgpu-adapter=swiftshader --ignore-gpu-blocklist --enable-unsafe-swiftshader";
 
         private const string FlagsOverrideFileName = "browser-flags.txt";
         private const string ModeFileName = "webgpu-mode.txt";
         private const string StatusFileName = "webgpu-status.txt";
+
+        // Records which ladder generation ran last. Bump the value whenever
+        // a rung is added/moved - consoles that already settled on "auto-cpu"
+        // then resume directly at the newest rung instead of re-running the
+        // rungs that already failed there.
+        private const string LadderGenFileName = "webgpu-ladder-gen.txt";
+        private const string CurrentLadderGeneration = "gen2-1.5.0.0";
 
         /// <summary>
         /// Persisted WebGPU strategy (webgpu-mode.txt). "auto-*" values are
@@ -347,9 +383,11 @@ namespace onitor.Classes
             FreshAuto,    // no / unknown file -> launch rung 1 (d3d11)
             AutoD3D11,    // ladder rung 1 running
             AutoD3D12,    // ladder rung 2 running
+            AutoGles,     // ladder rung 3 running (GLES via ANGLE)
             AutoCpu,      // ladder settled on SwiftShader
             PinnedD3D11,  // user pinned rung 1 - never auto-advance
-            PinnedD3D12   // user pinned rung 2 - never auto-advance
+            PinnedD3D12,  // user pinned rung 2 - never auto-advance
+            PinnedGles    // user pinned rung 3 - never auto-advance
         }
 
         // --------------------------------------------------------------------
@@ -444,21 +482,29 @@ namespace onitor.Classes
     var gl2 = webglLine();
     navigator.gpu.requestAdapter().then(function (a) {
       if (!a) { paint('bad', 'WebGPU: unavailable', gl2); return; }
-      var fb = false;
+      var info = {};
+      try { info = a.info || {}; } catch (e) {}
       var d = '';
+      try { d = info.description || info.architecture || ''; } catch (e) {}
+      if (!d) {
+        try {
+          if (typeof a.requestAdapterInfo === 'function') {
+            var ri = a.requestAdapterInfo();
+            if (ri) d = ri.description || ri.architecture || '';
+          }
+        } catch (e) {}
+      }
+      var fb = false;
       try { fb = !!(a.isFallback || a.isFallbackAdapter); } catch (e) {}
-      try {
-        var i = a.info || {};
-        d = i.description || i.architecture || '';
-        if (!d && typeof a.requestAdapterInfo === 'function') {
-          var ri = a.requestAdapterInfo();
-          if (ri) d = ri.description || ri.architecture || '';
-        }
-      } catch (e) {}
+      // Software is ALSO detected by NAME: an explicitly requested
+      // SwiftShader adapter (ladder rung 4) reports isFallback=false, so the
+      // flag alone lied in v1.4.0.0 (green badge with 'adapter: SwiftShader').
+      var hay = d + ' ' + (info.vendor || '') + ' ' + (info.architecture || '');
+      var soft = fb || /swiftshader|software|llvmpipe|basic render|warp/i.test(hay);
       if (d) d = String(d);
       if (d.length > 46) d = d.slice(0, 45) + '\u2026';
-      if (fb) {
-        paint('soft', 'WebGPU: software \u00b7 SwiftShader',
+      if (soft) {
+        paint('soft', 'WebGPU: software' + (/swiftshader/i.test(hay) ? ' \u00b7 SwiftShader' : ''),
           (d ? 'adapter: ' + d : '') + (gl2 ? (d ? ' \u00b7 ' : '') + gl2 : ''));
       } else {
         paint('ok', 'WebGPU: hardware \u2713',
@@ -549,6 +595,10 @@ namespace onitor.Classes
                 {
                     args += " " + XboxCpuBrowserArguments;
                 }
+                else if (mode == WebGpuMode.AutoGles || mode == WebGpuMode.PinnedGles)
+                {
+                    args += " " + XboxGlesBrowserArguments;
+                }
                 else if (mode == WebGpuMode.AutoD3D12 || mode == WebGpuMode.PinnedD3D12)
                 {
                     args += " " + XboxD3D12BrowserArguments;
@@ -590,7 +640,39 @@ namespace onitor.Classes
                 Windows.Storage.ApplicationData.Current.LocalFolder.Path, fileName);
         }
 
+        /// <summary>
+        /// Resolves the effective mode for THIS process: raw file value,
+        /// adjusted for ladder generation changes (see ReadWebGpuModeFile).
+        /// Called from the static constructor (flag computation) and from the
+        /// startup probe - both get the same answer.
+        /// </summary>
         private static WebGpuMode ReadWebGpuMode()
+        {
+            WebGpuMode mode = ReadWebGpuModeFile();
+            if (!LadderGenerationIsCurrent())
+            {
+                if (mode == WebGpuMode.AutoCpu)
+                {
+                    // Previous ladder ran to completion here (settled on
+                    // SwiftShader): resume directly at the first NEW rung
+                    // instead of re-running rungs that already failed.
+                    mode = WebGpuMode.AutoGles;
+                    TrySetWebGpuMode("auto-gles");
+                }
+                else if (mode != WebGpuMode.PinnedD3D11 &&
+                         mode != WebGpuMode.PinnedD3D12 &&
+                         mode != WebGpuMode.PinnedGles)
+                {
+                    // Never started, or mid-ladder of an older generation:
+                    // start over from rung 1 (user pins survive).
+                    mode = WebGpuMode.FreshAuto;
+                }
+                TryWriteLadderGeneration();
+            }
+            return mode;
+        }
+
+        private static WebGpuMode ReadWebGpuModeFile()
         {
             try
             {
@@ -600,9 +682,11 @@ namespace onitor.Classes
                     string mode = System.IO.File.ReadAllText(path).Trim();
                     if (string.Equals(mode, "auto-d3d11", StringComparison.OrdinalIgnoreCase)) return WebGpuMode.AutoD3D11;
                     if (string.Equals(mode, "auto-d3d12", StringComparison.OrdinalIgnoreCase)) return WebGpuMode.AutoD3D12;
+                    if (string.Equals(mode, "auto-gles", StringComparison.OrdinalIgnoreCase)) return WebGpuMode.AutoGles;
                     if (string.Equals(mode, "auto-cpu", StringComparison.OrdinalIgnoreCase)) return WebGpuMode.AutoCpu;
                     if (string.Equals(mode, "d3d11", StringComparison.OrdinalIgnoreCase)) return WebGpuMode.PinnedD3D11;
                     if (string.Equals(mode, "d3d12", StringComparison.OrdinalIgnoreCase)) return WebGpuMode.PinnedD3D12;
+                    if (string.Equals(mode, "gles", StringComparison.OrdinalIgnoreCase)) return WebGpuMode.PinnedGles;
                     // Anything else - "auto", legacy v1.3.0.0 values ("gpu" /
                     // bare "cpu"), garbage - starts a FRESH ladder so every
                     // upgraded console retries hardware automatically.
@@ -613,6 +697,33 @@ namespace onitor.Classes
                 Debug.WriteLine("[Onitor] Could not read " + ModeFileName + ": " + ex.Message);
             }
             return WebGpuMode.FreshAuto;
+        }
+
+        private static bool LadderGenerationIsCurrent()
+        {
+            try
+            {
+                string path = LocalStatePath(LadderGenFileName);
+                if (System.IO.File.Exists(path))
+                {
+                    string gen = System.IO.File.ReadAllText(path).Trim();
+                    return string.Equals(gen, CurrentLadderGeneration, StringComparison.OrdinalIgnoreCase);
+                }
+            }
+            catch (Exception) { }
+            return false;
+        }
+
+        private static void TryWriteLadderGeneration()
+        {
+            try
+            {
+                System.IO.File.WriteAllText(LocalStatePath(LadderGenFileName), CurrentLadderGeneration);
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine("[Onitor] Could not write " + LadderGenFileName + ": " + ex.Message);
+            }
         }
 
         /// <summary>
@@ -642,9 +753,11 @@ namespace onitor.Classes
             {
                 case WebGpuMode.AutoD3D11: return "auto-d3d11";
                 case WebGpuMode.AutoD3D12: return "auto-d3d12";
+                case WebGpuMode.AutoGles: return "auto-gles";
                 case WebGpuMode.AutoCpu: return "auto-cpu";
                 case WebGpuMode.PinnedD3D11: return "d3d11 (pinned)";
                 case WebGpuMode.PinnedD3D12: return "d3d12 (pinned)";
+                case WebGpuMode.PinnedGles: return "gles (pinned)";
                 default: return "fresh-auto";
             }
         }
@@ -938,8 +1051,12 @@ namespace onitor.Classes
                 await Task.Delay(2500); // let the first page settle
 
                 // GPUAdapter.isFallbackAdapter was renamed to isFallback
-                // around Chrome 119 - check BOTH, or a SwiftShader fallback
-                // gets misreported as hardware (the v1.3.0.0 bug).
+                // around Chrome 119 - check BOTH. Additionally an
+                // EXPLICITLY requested SwiftShader adapter (rung 4) reports
+                // isFallback=false, so software is also detected by adapter
+                // NAME (SwiftShader/llvmpipe/Basic Render/WARP) - otherwise a
+                // forced SwiftShader adapter is misreported as hardware
+                // (the v1.4.0.0 badge bug).
                 string probeJs =
                     "(function(){" +
                     "  if (!navigator.gpu) return 'none';" +
@@ -947,8 +1064,11 @@ namespace onitor.Classes
                     "    function(a){" +
                     "      if (!a) return 'null';" +
                     "      var fb=false; try { fb = !!(a.isFallback || a.isFallbackAdapter); } catch(e){}" +
-                    "      var d=''; try { var i=a.info||{}; d=i.description||i.architecture||''; } catch(e){}" +
-                    "      return (fb?'fallback:':'gpu:') + String(d).slice(0,90);" +
+                    "      var d='',v='';" +
+                    "      try { var i=a.info||{}; d=i.description||''; v=(i.architecture||'')+' '+(i.vendor||'');" +
+                    "        if(!d && !v && typeof a.requestAdapterInfo==='function'){ var ri=a.requestAdapterInfo(); if(ri){ d=ri.description||''; v=(ri.architecture||'')+' '+(ri.vendor||''); } } } catch(e){}" +
+                    "      var soft = fb || /swiftshader|software|llvmpipe|basic render|warp/i.test(d+' '+v);" +
+                    "      return (soft?'fallback:':'gpu:') + String(d||v).slice(0,90);" +
                     "    }," +
                     "    function(){ return 'error'; });" +
                     "  } catch (e) { return 'error'; }" +
@@ -990,7 +1110,8 @@ namespace onitor.Classes
                     {
                         string next = null;
                         if (mode == WebGpuMode.AutoD3D11) next = "auto-d3d12";
-                        else if (mode == WebGpuMode.AutoD3D12) next = "auto-cpu";
+                        else if (mode == WebGpuMode.AutoD3D12) next = "auto-gles";
+                        else if (mode == WebGpuMode.AutoGles) next = "auto-cpu";
 
                         if (next != null && TrySetWebGpuMode(next))
                         {
