@@ -255,6 +255,65 @@ namespace onitor.Classes
         private string _pendingUserAgent;
         private BrowserSettings _settings;
 
+        // ====================================================================
+        // WebGPU / WebNN enablement
+        // ====================================================================
+        // WebView2 does not expose edge://flags or chrome://flags (internal
+        // browser pages are disabled in embedded contexts), so Chromium
+        // features have to be turned on through browser launch arguments
+        // supplied by the host process. WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS
+        // is a documented WebView2 loader variable that is read when the first
+        // WebView2 environment of the process is created, so setting it from
+        // this static constructor (guaranteed to run before the first engine
+        // instance is constructed) covers every tab of the app.
+        //
+        //   --enable-unsafe-webgpu : turns on the WebGPU API, required by
+        //                             webml.ai / WebLLM / transformers.js etc.
+        //   --enable-features=...  : WebGPU (legacy pre-ship feature name,
+        //                             ignored by newer runtimes) plus WebNN
+        //                             (Edge feature name: msWebNN, Chromium
+        //                             prototype name: WebNNAPI) - unknown
+        //                             feature names are ignored safely.
+        //
+        // Xbox note: Chromium's WebGPU stack (Dawn) does not provide hardware
+        // D3D12 adapters on Xbox (Dawn lists Xbox as unsupported). When no
+        // hardware adapter is available, Chromium exposes a software
+        // (SwiftShader) fallback adapter instead, so WebGPU apps still run -
+        // just on the CPU and therefore slower. On desktop the Evergreen
+        // runtime supplies a real hardware adapter.
+        // ====================================================================
+        private const string GpuFeatureBrowserArguments =
+            "--enable-unsafe-webgpu --enable-features=WebGPU,msWebNN,WebNNAPI";
+
+        static ChromiumEngine()
+        {
+            try
+            {
+                string existing = Environment.GetEnvironmentVariable(
+                    "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS");
+                if (string.IsNullOrEmpty(existing))
+                {
+                    Environment.SetEnvironmentVariable(
+                        "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
+                        GpuFeatureBrowserArguments);
+                }
+                else if (existing.IndexOf("--enable-unsafe-webgpu", StringComparison.OrdinalIgnoreCase) < 0)
+                {
+                    // Keep whatever the environment already forced, just make
+                    // sure the GPU feature flags are present as well.
+                    Environment.SetEnvironmentVariable(
+                        "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
+                        existing + " " + GpuFeatureBrowserArguments);
+                }
+                Debug.WriteLine("[Onitor] WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = " +
+                    Environment.GetEnvironmentVariable("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS"));
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine("[Onitor] Failed to set WebGPU browser arguments: " + ex.Message);
+            }
+        }
+
         public ChromiumEngine()
         {
             _wv2 = new Mux.WebView2();

@@ -40,6 +40,29 @@ Notes for Xbox:
   Engine Mode = Legacy to use the TV-optimized YouTube interface.
 
 
+WebGPU / WEBNN (AI MODELS IN THE BROWSER) - new in 1.2.0.0
+----------------------------------------------------------
+WebGPU (and the WebNN feature names) are now enabled by default in the
+Chromium engine. WebView2 does not have edge://flags / chrome://flags -
+those internal pages only exist in full browsers - so the equivalent is
+done by the app itself via browser launch arguments
+(--enable-unsafe-webgpu --enable-features=WebGPU,msWebNN,WebNNAPI).
+Sites like webml.ai/playground, webllm.ai or any WebGPU demo should now
+detect navigator.gpu and load their "GPU shader" models.
+
+What to expect per device:
+- WINDOWS 10/11 DESKTOP: full hardware-accelerated WebGPU through the
+  Evergreen WebView2 runtime (your PC's GPU).
+- XBOX DEV MODE: Microsoft's WebGPU stack (Dawn) does not provide hardware
+  D3D12 adapters on Xbox, so Chromium falls back to a software (SwiftShader)
+  adapter. WebGPU apps and AI model loaders will WORK, but inference runs
+  on the CPU - expect small models to load and respond slowly rather than
+  at GPU speed. This is a platform limitation of WebView2 on Xbox, not
+  something the app can switch on.
+  Quick check: open https://webgpu.github.io/webgpu-samples/ - samples
+  should render (software-rendered on Xbox).
+
+
 INSTALL ON WINDOWS 10/11 DESKTOP / TABLET
 ----------------------------------------
 1. Copy the OnitorBrowser_<version>_x64_Test folder to the PC.
@@ -76,3 +99,6 @@ WHAT WAS CHANGED vs original Onitor
 - Fixed early-return bug in WhitelistedPages.
 - Xbox mouse emulation enabled (RequiresPointerMode).
 - TargetPlatformMinVersion raised to 10.0.17763 (required by WebView2).
+- NEW 1.2.0.0: WebGPU enabled in the Chromium engine via
+  WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS (no edge://flags in WebView2),
+  plus WebNN feature names for Edge/Chromium runtimes.
