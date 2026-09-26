@@ -2,7 +2,7 @@ name: Build Onitor UWP (x64)
 
 on:
   push:
-    branches: [master, main]
+    branches: [master, main, onitor-webview2-build]
   workflow_dispatch:
 
 jobs:
