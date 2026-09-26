@@ -256,7 +256,7 @@ namespace onitor.Classes
         private BrowserSettings _settings;
 
         // ====================================================================
-        // WebGPU / WebNN enablement
+        // WebGPU / WebNN enablement + Xbox performance strategy
         // ====================================================================
         // WebView2 does not expose edge://flags or chrome://flags (internal
         // browser pages are disabled in embedded contexts), so Chromium
@@ -267,35 +267,67 @@ namespace onitor.Classes
         // this static constructor (guaranteed to run before the first engine
         // instance is constructed) covers every tab of the app.
         //
+        // Base flags (all platforms):
         //   --enable-unsafe-webgpu : turns on the WebGPU API, required by
-        //                             webml.ai / WebLLM / transformers.js etc.
+        //                            webml.ai / WebLLM / transformers.js etc.
         //   --enable-features=...  : WebGPU (legacy pre-ship feature name,
-        //                             ignored by newer runtimes) plus WebNN
-        //                             (Edge feature name: msWebNN, Chromium
-        //                             prototype name: WebNNAPI) - unknown
-        //                             feature names are ignored safely.
+        //                            ignored by newer runtimes) plus WebNN
+        //                            (Edge feature name: msWebNN, Chromium
+        //                            prototype name: WebNNAPI) - unknown
+        //                            feature names are ignored safely.
         //
-        // Xbox note: Chromium's WebGPU stack (Dawn) does not provide hardware
-        // D3D12 adapters on Xbox (Dawn lists Xbox as unsupported). When no
-        // hardware adapter is available, Chromium exposes a software
-        // (SwiftShader) fallback adapter instead, so WebGPU apps still run -
-        // just on the CPU and therefore slower. On desktop the Evergreen
-        // runtime supplies a real hardware adapter.
+        // Additional Xbox flags (device family "Windows.Xbox"):
+        //   --ignore-gpu-blocklist          : attempt hardware GPU (D3D11)
+        //                                      compositing/WebGL even when the
+        //                                      console GPU is blocklisted, which
+        //                                      offloads rendering from the CPU.
+        //                                      Chromium falls back to software
+        //                                      by itself if the GPU process
+        //                                      keeps crashing.
+        //   --use-webgpu-adapter=swiftshader: Dawn (Chromium's WebGPU stack)
+        //                                      has NO Xbox D3D12 backend, so
+        //                                      hardware WebGPU adapters are
+        //                                      unavailable on console. Forcing
+        //                                      the SwiftShader (CPU) adapter
+        //                                      makes WebGPU reliably available;
+        //                                      AI models then load and run on
+        //                                      the CPU (works, but slower than
+        //                                      a real GPU would be).
+        //   --enable-unsafe-swiftshader     : also allow SwiftShader for WebGL
+        //                                      when no hardware adapter exists.
+        //
+        // Power-user override: if the file
+        //   <app local state>\browser-flags.txt
+        // exists and is non-empty, its complete content is used verbatim as
+        // the browser arguments instead of the computed defaults (editable
+        // on Xbox through the Device Portal file explorer - no rebuild
+        // needed to experiment with flags).
+        //
+        // Combined with the "expandedResources" restricted capability in
+        // Package.appxmanifest (game-level system resources on Xbox dev
+        // mode: more exclusive CPU cores and far more memory) this gives
+        // the SwiftShader WebGPU path the largest possible CPU budget.
         // ====================================================================
-        private const string GpuFeatureBrowserArguments =
+        private const string BaseGpuFeatureBrowserArguments =
             "--enable-unsafe-webgpu --enable-features=WebGPU,msWebNN,WebNNAPI";
+
+        private const string XboxExtraBrowserArguments =
+            "--ignore-gpu-blocklist --use-webgpu-adapter=swiftshader --enable-unsafe-swiftshader";
+
+        private const string FlagsOverrideFileName = "browser-flags.txt";
 
         static ChromiumEngine()
         {
             try
             {
+                string flags = ComputeBrowserArguments();
+
                 string existing = Environment.GetEnvironmentVariable(
                     "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS");
                 if (string.IsNullOrEmpty(existing))
                 {
                     Environment.SetEnvironmentVariable(
-                        "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
-                        GpuFeatureBrowserArguments);
+                        "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", flags);
                 }
                 else if (existing.IndexOf("--enable-unsafe-webgpu", StringComparison.OrdinalIgnoreCase) < 0)
                 {
@@ -303,7 +335,7 @@ namespace onitor.Classes
                     // sure the GPU feature flags are present as well.
                     Environment.SetEnvironmentVariable(
                         "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
-                        existing + " " + GpuFeatureBrowserArguments);
+                        existing + " " + flags);
                 }
                 Debug.WriteLine("[Onitor] WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = " +
                     Environment.GetEnvironmentVariable("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS"));
@@ -312,6 +344,48 @@ namespace onitor.Classes
             {
                 Debug.WriteLine("[Onitor] Failed to set WebGPU browser arguments: " + ex.Message);
             }
+        }
+
+        private static string ComputeBrowserArguments()
+        {
+            // 1) Power-user override file wins if present.
+            try
+            {
+                string overridePath = System.IO.Path.Combine(
+                    Windows.Storage.ApplicationData.Current.LocalFolder.Path,
+                    FlagsOverrideFileName);
+                if (System.IO.File.Exists(overridePath))
+                {
+                    string custom = System.IO.File.ReadAllText(overridePath);
+                    if (!string.IsNullOrWhiteSpace(custom))
+                    {
+                        Debug.WriteLine("[Onitor] Custom browser flags loaded from " + overridePath);
+                        return custom.Trim();
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine("[Onitor] Could not read " + FlagsOverrideFileName + ": " + ex.Message);
+            }
+
+            // 2) Computed defaults.
+            bool isXbox = false;
+            try
+            {
+                isXbox = Windows.System.Profile.AnalyticsInfo.VersionInfo.DeviceFamily == "Windows.Xbox";
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine("[Onitor] DeviceFamily detection failed: " + ex.Message);
+            }
+
+            string args = BaseGpuFeatureBrowserArguments;
+            if (isXbox)
+            {
+                args += " " + XboxExtraBrowserArguments;
+            }
+            return args;
         }
 
         public ChromiumEngine()

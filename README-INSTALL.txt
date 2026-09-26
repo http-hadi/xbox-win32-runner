@@ -45,22 +45,56 @@ WebGPU / WEBNN (AI MODELS IN THE BROWSER) - new in 1.2.0.0
 WebGPU (and the WebNN feature names) are now enabled by default in the
 Chromium engine. WebView2 does not have edge://flags / chrome://flags -
 those internal pages only exist in full browsers - so the equivalent is
-done by the app itself via browser launch arguments
-(--enable-unsafe-webgpu --enable-features=WebGPU,msWebNN,WebNNAPI).
-Sites like webml.ai/playground, webllm.ai or any WebGPU demo should now
-detect navigator.gpu and load their "GPU shader" models.
+done by the app itself via browser launch arguments, set before the first
+WebView2 environment is created (WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS).
 
 What to expect per device:
 - WINDOWS 10/11 DESKTOP: full hardware-accelerated WebGPU through the
-  Evergreen WebView2 runtime (your PC's GPU).
-- XBOX DEV MODE: Microsoft's WebGPU stack (Dawn) does not provide hardware
-  D3D12 adapters on Xbox, so Chromium falls back to a software (SwiftShader)
-  adapter. WebGPU apps and AI model loaders will WORK, but inference runs
-  on the CPU - expect small models to load and respond slowly rather than
-  at GPU speed. This is a platform limitation of WebView2 on Xbox, not
-  something the app can switch on.
-  Quick check: open https://webgpu.github.io/webgpu-samples/ - samples
-  should render (software-rendered on Xbox).
+  Evergreen WebView2 runtime (your PC's GPU). Flags used:
+  --enable-unsafe-webgpu --enable-features=WebGPU,msWebNN,WebNNAPI
+- XBOX DEV MODE: Chromium's WebGPU stack (Dawn) has no Xbox D3D12
+  backend, so a hardware WebGPU adapter is impossible today. The app
+  therefore ALSO passes --use-webgpu-adapter=swiftshader which guarantees
+  a software (CPU) WebGPU adapter: sites like webml.ai/playground will
+  detect WebGPU, load their "GPU shader" models and run them - on the
+  CPU. Small models (tiny LLMs, Whisper-tiny, embeddings) are usable;
+  big ones will be slow. Plus --ignore-gpu-blocklist and
+  --enable-unsafe-swiftshader to try hardware compositing/WebGL first
+  and fall back to software only if that fails.
+
+CHANGING FLAGS WITHOUT A REBUILD (power users)
+----------------------------------------------
+If the file  browser-flags.txt  exists in the app's local state folder,
+its entire content is used verbatim as the WebView2 browser arguments
+(replacing the built-in defaults). On Xbox, browse to
+http://<console-ip>:11443 (Device Portal) -> File explorer -> find the
+Onitor app's LocalState folder -> create/edit browser-flags.txt, then
+restart the app. Example contents to attempt hardware WebGPU instead of
+SwiftShader:
+    --enable-unsafe-webgpu --ignore-gpu-blocklist
+Delete the file (or empty it) to return to the built-in defaults.
+
+
+MORE CPU POWER ON XBOX (new in 1.2.0.0)
+---------------------------------------
+The package now declares the restricted capability "expandedResources"
+(same trick RetroArch uses). Plain UWP apps on Xbox run in a small
+shared partition (limited CPU share + very little memory); apps with
+this capability get GAME-level resources: 4 exclusive + 2 shared CPU
+cores and gigabytes more memory. That is the biggest possible CPU/RAM
+budget for the browser and its WebGPU-on-CPU inference.
+Caveat: one community report saw WebView2 hard-crash an XBOX ONE when
+running with game resources (Series X|S were fine, Series S OOM'd less
+than in app mode). If you are on an Xbox One and the console reboots
+when launching the browser, tell us and we ship a build without the
+capability.
+
+Why the console still won't match a gaming PC: the Xbox Series X|S CPU
+is 8x Zen 2 cores at 3.6-3.8 GHz - great multi-core throughput, but
+single-core performance is around half of a modern laptop CPU (which is
+why benchmark sites rate it below a new Dell Inspiron). Browsing and
+video feel fine because that is mostly multi-core work; CPU-based AI
+inference is the most demanding thing you can throw at it.
 
 
 INSTALL ON WINDOWS 10/11 DESKTOP / TABLET

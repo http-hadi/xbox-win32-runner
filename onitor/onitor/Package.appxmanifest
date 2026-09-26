@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10" 
          xmlns:mp="http://schemas.microsoft.com/appx/2014/phone/manifest" 
          xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10" 
@@ -97,6 +97,13 @@
     <Capability Name="privateNetworkClientServer" />
     <rescap:Capability Name="extendedBackgroundTaskTime" />
     <rescap:Capability Name="extendedExecutionUnconstrained" />
+    <!-- Game-level system resources on Xbox dev mode: exclusive CPU cores +
+         far more memory (plain apps are capped in a small shared partition).
+         Same restricted capability RetroArch ships to get full console
+         performance. Ignored on desktop Windows. Note: one community report
+         saw WebView2 hard-crash an XBOX ONE in game mode; Series X|S were
+         fine. If a One console reboots on launch, remove this line. -->
+    <rescap:Capability Name="expandedResources" />
     <uap:Capability Name="removableStorage" />
     <uap:Capability Name="documentsLibrary" />
     <iot:Capability Name="systemManagement" />
