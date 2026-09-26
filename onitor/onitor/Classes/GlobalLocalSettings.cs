@@ -26,5 +26,6 @@ namespace onitor.Classes
         public static string JSConsole;
         public static string SavedUserAgent;
         public static string AggressiveCacheClean;
+        public static string EngineMode;
     }
 }

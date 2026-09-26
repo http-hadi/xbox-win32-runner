@@ -14,6 +14,7 @@ using Windows.UI.Xaml.Automation.Peers;
 using Windows.UI.Xaml.Automation.Provider;
 using System.Text.RegularExpressions;
 using Windows.UI.Popups;
+using onitor.Classes;
 
 namespace Onitor
 {
@@ -52,7 +53,7 @@ namespace Onitor
                 if (ApiInformation.IsApiContractPresent("Windows.Foundation.UniversalApiContract", 7))
                 {
                     WebViewSelectionFlyout Selection = _selectionFlyout as WebViewSelectionFlyout;
-                    Selection.Core = value as WebView;
+                    Selection.Core = value as BrowserView;
                 }
             }
         }
@@ -219,9 +220,9 @@ namespace Onitor
             {
                 try
                 {
-                    if (Core is WebView)
+                    if (Core is BrowserView)
                     {
-                        WebView coreWView = Core as WebView;
+                        BrowserView coreWView = Core as BrowserView;
 
                         string SelectionText = await coreWView.SelectionText();
                         if (Uri.IsWellFormedUriString(SelectionText, UriKind.Absolute) && SelectionText.Contains("."))
@@ -293,9 +294,9 @@ namespace Onitor
             {
                 try
                 {
-                    if (Core is WebView)
+                    if (Core is BrowserView)
                     {
-                        WebView coreWView = Core as WebView;
+                        BrowserView coreWView = Core as BrowserView;
                         WebViewSelection Selection = coreWView.Tag as WebViewSelection;
                         if (!string.IsNullOrEmpty(Selection.SelectionText))
                         {
@@ -400,9 +401,9 @@ namespace Onitor
                 _core.KeyDown -= _core_KeyDown;
 
                 HideItems();
-                if (Core is WebView)
+                if (Core is BrowserView)
                 {
-                    WebView coreWView = Core as WebView;
+                    BrowserView coreWView = Core as BrowserView;
 
                     await Task.Delay(100);
                     coreWView.Focus(FocusState.Programmatic);
@@ -440,16 +441,16 @@ namespace Onitor
 
             private void PastenGoButton_Click(object sender, RoutedEventArgs e) { WebViewMenuEvents.PastenGo(_core as AddressTextBox); }
 
-            private void OpenLinkNewTabButton_Click(object sender, RoutedEventArgs e) { WebViewMenuEvents.OpenLinkNewTab(_core as WebView); }
+            private void OpenLinkNewTabButton_Click(object sender, RoutedEventArgs e) { WebViewMenuEvents.OpenLinkNewTab(_core as BrowserView); }
 
             private void SelectAllButton_Click(object sender, RoutedEventArgs e) { WebViewMenuEvents.SelectAll(_core); }
 
-            private void SearchButton_Click(object sender, RoutedEventArgs e) { WebViewMenuEvents.Search(_core as WebView); }
+            private void SearchButton_Click(object sender, RoutedEventArgs e) { WebViewMenuEvents.Search(_core as BrowserView); }
         }
 
         public class WebViewSelectionFlyout : CommandBarFlyout
         {
-            WebView _core;
+            BrowserView _core;
 
             AppBarButton CutButton;
             AppBarButton CopyButton;
@@ -548,7 +549,7 @@ namespace Onitor
             {
                 try
                 {
-                    WebView coreWView = Core as WebView;
+                    BrowserView coreWView = Core as BrowserView;
 
                     string SelectionText = await coreWView.SelectionText();
                     if (await coreWView.IsFocusedElementEditiable())
@@ -625,7 +626,7 @@ namespace Onitor
                 }
             }
 
-            internal WebView Core
+            internal BrowserView Core
             {
                 get
                 {
@@ -659,9 +660,9 @@ namespace Onitor
 
             internal static async void Cut(FrameworkElement Core)
             {
-                if (Core is WebView)
+                if (Core is BrowserView)
                 {
-                    WebView coreWView = Core as WebView;
+                    BrowserView coreWView = Core as BrowserView;
 
                     var dataPackage = new DataPackage();
                     dataPackage.SetText(await coreWView.SelectionText());
@@ -683,9 +684,9 @@ namespace Onitor
 
             internal static async void Copy(FrameworkElement Core)
             {
-                if (Core is WebView)
+                if (Core is BrowserView)
                 {
-                    WebView coreWView = Core as WebView;
+                    BrowserView coreWView = Core as BrowserView;
 
                     var dataPackage = new DataPackage();
                     dataPackage.SetText(await coreWView.SelectionText());
@@ -700,9 +701,9 @@ namespace Onitor
 
             internal static async void Paste(FrameworkElement Core)
             {
-                if (Core is WebView)
+                if (Core is BrowserView)
                 {
-                    WebView coreWView = Core as WebView;
+                    BrowserView coreWView = Core as BrowserView;
 
                     var dataPackageView = Clipboard.GetContent();
                     if (dataPackageView.Contains(StandardDataFormats.Text))
@@ -739,18 +740,18 @@ namespace Onitor
                 }
             }
 
-            internal static async void OpenLinkNewTab(WebView Core)
+            internal static async void OpenLinkNewTab(BrowserView Core)
             {
-                WebView coreWView = Core as WebView;
+                BrowserView coreWView = Core as BrowserView;
 
                 WebResources.Navigate("onitor:Go=" + await coreWView.ActiveElementLink());
             }
 
             internal static async void SelectAll(FrameworkElement Core)
             {
-                if (Core is WebView)
+                if (Core is BrowserView)
                 {
-                    WebView coreWView = Core as WebView;
+                    BrowserView coreWView = Core as BrowserView;
 
                     await coreWView.InvokeScriptAsync("eval", new string[] { @"
                         window.getSelection().removeAllRanges();
@@ -764,7 +765,7 @@ namespace Onitor
                 }
             }
 
-            internal static async void Search(WebView Core)
+            internal static async void Search(BrowserView Core)
             {
                 ApplicationDataContainer localSettings =
                     ApplicationData.Current.LocalSettings;

@@ -12,8 +12,35 @@ namespace onitor.Classes
     class BlockedDomains
     {
         public static List<string> URL_LIST;
+
+        /// <summary>
+        /// True while a YouTube page is the top-level document of a tab.
+        /// The YouTube TV player requires Google's IMA ad SDK hosts or
+        /// playback stalls on the fallback engine; those hosts stay blocked
+        /// everywhere else.
+        /// </summary>
+        public static bool IsYouTubeContext;
+
+        // Hosts the YouTube TV player needs that domains.txt blocks
+        // (imasdk.googleapis.com = Google IMA ad SDK).
+        private static readonly System.Collections.Generic.HashSet<string> PlayerRequiredHosts =
+            new System.Collections.Generic.HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                "imasdk.googleapis.com"
+            };
+
         public static bool IsUrlAllowed(Uri url)
         {
+            if (url == null || url.Host == null)
+            {
+                return true;
+            }
+
+            if (IsYouTubeContext && PlayerRequiredHosts.Contains(url.Host))
+            {
+                return true;
+            }
+
             if (URL_LIST == null)
             {
                 URL_LIST = new List<string>();
@@ -65,7 +92,7 @@ namespace onitor.Classes
 
         public static string XHRBlocking()
         {
-            var xhrHandler = @"var blacklist = " + JsonConvert.SerializeObject(URL_LIST) + @"; var xhrbody=false; const origSend = window.XMLHttpRequest.prototype.send; const origOpen = window.XMLHttpRequest.prototype.open; XMLHttpRequest.prototype.open = function (method, url, async, user, password) { this._url = url; var testurl = new URL((this._url.startsWith('http')?this._url:'http://'+this._url)); if(lockdown){console.error('Request blocked due Lock Down mode: '+testurl.hostname); return;} if(blacklist.indexOf(testurl.hostname)!=-1){ console.error('XHR request blocked due blacklist, Target: '+testurl.hostname); console.xhr(`XHR -> blocked to ${this._url}`); return; }  origOpen.apply(this, arguments); };
+            var xhrHandler = @"var lockdown = false; var blacklist = " + JsonConvert.SerializeObject(URL_LIST) + @"; var xhrbody=false; const origSend = window.XMLHttpRequest.prototype.send; const origOpen = window.XMLHttpRequest.prototype.open; XMLHttpRequest.prototype.open = function (method, url, async, user, password) { this._url = url; var testurl = new URL((this._url.startsWith('http')?this._url:'http://'+this._url)); if(lockdown){console.error('Request blocked due Lock Down mode: '+testurl.hostname); return;} if(blacklist.indexOf(testurl.hostname)!=-1){ console.error('XHR request blocked due blacklist, Target: '+testurl.hostname); console.xhr(`XHR -> blocked to ${this._url}`); return; }  origOpen.apply(this, arguments); };
                                        XMLHttpRequest.prototype.send = function () { var testurl = new URL((this._url.startsWith('http')?this._url:'http://'+this._url)); if(lockdown){console.error('Request blocked due Lock Down mode: '+testurl.hostname); return;} if(blacklist.indexOf(testurl.hostname)!=-1){ console.error('XHR request blocked due blacklist, Target: '+testurl.hostname); console.xhr(`XHR -> blocked to ${this._url}`); return; } if(xhrbody){ console.xhr(`XHR -> ${this._url} body:`, arguments[0]); }else{ console.xhr(`XHR -> sending to ${this._url}`); } origSend.apply(this, arguments); }";
 
 

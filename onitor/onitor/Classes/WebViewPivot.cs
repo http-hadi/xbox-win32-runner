@@ -3,6 +3,7 @@ using Windows.UI;
 using Windows.UI.ViewManagement;
 using Windows.UI.Xaml.Controls;
 using Windows.UI.Xaml.Media;
+using onitor.Classes;
 
 namespace Onitor
 {
@@ -16,7 +17,7 @@ namespace Onitor
             }
         }
 
-        public WebView SelectedWebView
+        public BrowserView SelectedWebView
         {
             get
             {

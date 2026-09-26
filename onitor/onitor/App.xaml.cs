@@ -290,6 +290,41 @@ namespace Onitor
                 }
                 Debug.WriteLine(GlobalLocalSettings.AggressiveCacheClean);
 
+                // WebView2 (Chromium) vs. legacy EdgeHTML engine selection.
+                // "Auto" prefers WebView2 whenever the OS supports it (Windows 10
+                // 1809+, Xbox One dev mode as UWP, Xbox Series X|S); "Legacy"
+                // forces the old engine as a troubleshooting escape hatch.
+                if (!localSettings.Values.ContainsKey("EngineMode"))
+                {
+                    localSettings.Values.Add("EngineMode", "Auto");
+                    GlobalLocalSettings.EngineMode = "Auto";
+                }
+                else
+                {
+                    GlobalLocalSettings.EngineMode = localSettings.Values["EngineMode"] as string;
+                    if (string.IsNullOrEmpty(GlobalLocalSettings.EngineMode))
+                    {
+                        GlobalLocalSettings.EngineMode = "Auto";
+                    }
+                }
+                Debug.WriteLine("EngineMode: " + GlobalLocalSettings.EngineMode);
+
+                // Xbox (dev mode): web content needs mouse emulation - the
+                // gamepad left stick moves a cursor, A clicks. Without this,
+                // D-pad XY-navigation cannot reach inside the web view.
+                try
+                {
+                    if (AnalyticsInfo.VersionInfo.DeviceFamily == "Windows.Xbox"
+                        && ApiInformation.IsPropertyPresent("Windows.UI.Xaml.Application", "RequiresPointerMode"))
+                    {
+                        this.RequiresPointerMode = ApplicationRequiresPointerMode.WhenPresent;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine("RequiresPointerMode not set: " + ex.Message);
+                }
+
                 Debug.WriteLine(GlobalLocalSettings.homePage);
 
                 // add default domain settings to list

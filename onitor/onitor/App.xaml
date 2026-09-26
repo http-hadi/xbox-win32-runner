@@ -9,6 +9,9 @@
             <ResourceDictionary.MergedDictionaries>
                 <ResourceDictionary Source="Styles/Styles.xaml" />
                 <flui:FluiFrameworkThemeResources/>
+                <!-- WinUI 2 library resources - required by the WebView2 control
+                     (Microsoft.UI.Xaml / Microsoft.Web.WebView2 NuGet chain). -->
+                <XamlControlsResources xmlns="using:Microsoft.UI.Xaml.Controls" />
             </ResourceDictionary.MergedDictionaries>
             <ResourceDictionary.ThemeDictionaries>
                 <ResourceDictionary x:Key="Default">

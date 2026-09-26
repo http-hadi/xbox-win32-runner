@@ -40,7 +40,11 @@ namespace onitor.Classes
                 }
                 else
                 {
-                    return false;
+                    // NOTE: the original code did "return false" here, which
+                    // aborted the scan at the first non-matching entry and made
+                    // per-page settings unreachable for every domain except
+                    // the first list entry. Keep scanning instead.
+                    continue;
                 }
             }
             return false;

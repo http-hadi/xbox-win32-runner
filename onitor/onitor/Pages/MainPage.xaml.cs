@@ -66,7 +66,7 @@ namespace Onitor
         CoreApplicationViewTitleBar coreTitleBar = CoreApplication.GetCurrentView().TitleBar;
         ApplicationViewTitleBar titleBar = ApplicationView.GetForCurrentView().TitleBar;
 
-        public static WebView currentWebView;
+        public static BrowserView currentWebView;
         private WebieHandler webieHandlerUI = new WebieHandler();
 
         ApplicationDataContainer localSettings = ApplicationData.Current.LocalSettings;
@@ -1657,7 +1657,7 @@ namespace Onitor
 
 
         bool isAggro;
-        private async void currentWebView_NavigationStarting(WebView sender, WebViewNavigationStartingEventArgs args)
+        private async void currentWebView_NavigationStarting(BrowserView sender, EngineNavStartingArgs args)
         {
             // test on clearing webvie data
            /* if (isAggro == true && !args.Uri.AbsoluteUri.Contains("71330982-ba82-4d35-b5cb-3488eefb31ed"))
@@ -1738,7 +1738,7 @@ namespace Onitor
 
         }
 
-        private void currentWebView_ContentLoading(FrameworkElement sender, WebViewContentLoadingEventArgs args)
+        private void currentWebView_ContentLoading(BrowserView sender, EngineContentLoadingArgs args)
         {
             if (PivotMain.SelectedWebViewItem.WebViewCore.URL.AbsoluteUri == "ms-appx-web:///PagesHTML/Home.html"
                 || PivotMain.SelectedWebViewItem.WebViewCore.URL.AbsoluteUri == "ms-appx-web://71330982-ba82-4d35-b5cb-3488eefb31ed/PagesHTML/Home.html")
@@ -1759,7 +1759,7 @@ namespace Onitor
             currentWebView.Focus(FocusState.Programmatic);
         }
 
-        private async void currentWebView_FrameNavigationCompleted(WebView sender, WebViewNavigationCompletedEventArgs args)
+        private async void currentWebView_FrameNavigationCompleted(BrowserView sender, EngineNavCompletedArgs args)
         {
             if (PivotMain.SelectedWebViewItem.WebViewCore.URL.AbsoluteUri == "ms-appx-web:///PagesHTML/Home.html"
                 || PivotMain.SelectedWebViewItem.WebViewCore.URL.AbsoluteUri == "ms-appx-web://71330982-ba82-4d35-b5cb-3488eefb31ed/PagesHTML/Home.html")
@@ -1799,7 +1799,7 @@ namespace Onitor
 
         }
 
-        private async void currentWebView_NavigationCompleted(WebView sender, WebViewNavigationCompletedEventArgs args)
+        private async void currentWebView_NavigationCompleted(BrowserView sender, EngineNavCompletedArgs args)
         {
 
 
@@ -1980,7 +1980,7 @@ MountContextMenuToVideos();
 
 
 
-        private void currentWebView_ContainsFullScreenElementChanged(WebView sender, object args)
+        private void currentWebView_ContainsFullScreenElementChanged(BrowserView sender, object args)
         {
             AsyncEngine.Execute(MainPagePG.Dispatcher.RunAsync(
                 CoreDispatcherPriority.Normal, () =>
@@ -2003,7 +2003,7 @@ MountContextMenuToVideos();
             GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced);
         }
 
-        private async void currentWebView_PermissionRequested(WebView sender, WebViewPermissionRequestedEventArgs args)
+        private async void currentWebView_PermissionRequested(BrowserView sender, EnginePermissionArgs args)
         {
             string currentPermission = "";
 
@@ -2095,14 +2095,14 @@ MountContextMenuToVideos();
             }
         }
 
-        private void currentWebView_NewWindowRequested(WebView sender, WebViewNewWindowRequestedEventArgs args)
+        private void currentWebView_NewWindowRequested(BrowserView sender, EngineNewWindowArgs args)
         {
             Navigate(args.Uri.AbsoluteUri, true);
 
             args.Handled = true;
         }
 
-        private void currentWebView_LongRunningScriptDetected(WebView sender, WebViewLongRunningScriptDetectedEventArgs args)
+        private void currentWebView_LongRunningScriptDetected(BrowserView sender, EngineLongRunningScriptArgs args)
         {
            /* if (args.ExecutionTime.TotalSeconds > 50)
             {
@@ -2113,7 +2113,7 @@ MountContextMenuToVideos();
             
         }
 
-        private void currentWebView_UnviewableContentIdentified(WebView sender, WebViewUnviewableContentIdentifiedEventArgs args)
+        private void currentWebView_UnviewableContentIdentified(BrowserView sender, EngineUriArgs args)
         {
             if (!isDownloading)
             {
@@ -2366,8 +2366,7 @@ MountContextMenuToVideos();
             currentWebView.ContentLoading += currentWebView_ContentLoading;
             currentWebView.FrameNavigationCompleted += currentWebView_FrameNavigationCompleted;
             currentWebView.NavigationCompleted += currentWebView_NavigationCompleted;
-            currentWebView.NewWindowRequested +=
-                new TypedEventHandler<WebView, WebViewNewWindowRequestedEventArgs>(currentWebView_NewWindowRequested);
+            currentWebView.NewWindowRequested += currentWebView_NewWindowRequested;
             currentWebView.ContainsFullScreenElementChanged += currentWebView_ContainsFullScreenElementChanged;
             currentWebView.PermissionRequested += currentWebView_PermissionRequested;
             currentWebView.LongRunningScriptDetected += currentWebView_LongRunningScriptDetected;
@@ -2381,12 +2380,12 @@ MountContextMenuToVideos();
             //webieHandlerUI.SelectionMenuOpening += WebieHandlerUI_SelectionMenuOpening;
         }
 
-        private void CurrentWebView_FrameDOMContentLoaded(WebView sender, WebViewDOMContentLoadedEventArgs args)
+        private void CurrentWebView_FrameDOMContentLoaded(BrowserView sender, EngineUriArgs args)
         {
             Debug.WriteLine("Frame HTML finished processing");
         }
 
-        private void CurrentWebView_DOMContentLoaded(WebView sender, WebViewDOMContentLoadedEventArgs args)
+        private void CurrentWebView_DOMContentLoaded(BrowserView sender, EngineUriArgs args)
         {
             Debug.WriteLine("Page HTML finished processing");
         }
@@ -2396,7 +2395,7 @@ MountContextMenuToVideos();
             args.Handled = true;
         }
 
-        private void CurrentWebView_ScriptNotify(object sender, NotifyEventArgs e)
+        private void CurrentWebView_ScriptNotify(object sender, EngineMessageArgs e)
         {
             Debug.WriteLine("Script Notify from currentWebView: " + e.Value);
         }
@@ -2798,9 +2797,9 @@ MountContextMenuToVideos();
             {
                 
                 var domain = currentWebView.Source.Host;
-				///
-				/// ADD YOUR API KEY HERE
-				///
+                                ///
+                                /// ADD YOUR API KEY HERE
+                                ///
                 string url = $"https://your-api-key.faviconkit.com/{domain}/512";
 
 

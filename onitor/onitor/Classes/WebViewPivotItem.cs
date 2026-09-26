@@ -1,11 +1,12 @@
 ﻿using System;
 using Windows.UI.Xaml;
 using Windows.UI.Xaml.Controls;
+using onitor.Classes;
 namespace Onitor
 {
     public class WebViewPivotItem : PivotItem
     {
-        private readonly WebView _webView;
+        private readonly BrowserView _webView;
         private readonly WebViewCore _webViewCore;
         private readonly Item _listViewItem;
 

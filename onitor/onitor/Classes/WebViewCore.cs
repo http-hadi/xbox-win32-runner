@@ -20,9 +20,15 @@ using SharedLibrary;
 
 namespace Onitor
 {
+    /// <summary>
+    /// Per-tab browser controller. Now engine-agnostic: the actual web content
+    /// is rendered by the BrowserView facade (Classes/BrowserView.cs), which
+    /// uses Microsoft's WebView2 (Chromium) when available and falls back to
+    /// the legacy EdgeHTML WebView otherwise (see Classes/BrowserEngines.cs).
+    /// </summary>
     public class WebViewCore
     {
-        private WebView _webView;
+        private BrowserView _webView;
         private string _pageZoom;
 
         ApplicationDataContainer localSettings = ApplicationData.Current.LocalSettings;
@@ -38,14 +44,22 @@ namespace Onitor
 
         public static int TotalAdsBlocked;
         public static int CurrentSessionAdsBlocked;
+
         public WebViewCore()
         {
-            _webView = new WebView(WebViewExecutionMode.SeparateThread);
+            _webView = BrowserViewFactory.Create();
+            _webView.EngineFailed += (sender, message) =>
+            {
+                Debug.WriteLine("[Onitor] Engine failure: " + message);
+            };
 
             PageZoom = "100%";
 
             if (ApiInformation.IsApiContractPresent("Windows.Foundation.UniversalApiContract", 3))
             {
+                // Context menu is suppressed on the app level (see MainPage
+                // CurrentWebView_ContextRequested) and the engines expose their
+                // own handling.
                 _webView.ContextFlyout = null;
             }
 
@@ -56,18 +70,15 @@ namespace Onitor
             _webView.FrameNavigationCompleted += _webView_FrameNavigationCompleted;
             _webView.NavigationCompleted += _webView_NavigationCompleted;
             _webView.ScriptNotify += _webView_ScriptNotify;
-            
+
             _webView.Settings.IsIndexedDBEnabled = true;
-
-           
-
 
             URL = _webView.Source;
 
             taskHandler.ReceivedData += TaskHandler_ReceivedData;
         }
 
-        private void _webView_ScriptNotify(object sender, NotifyEventArgs e)
+        private void _webView_ScriptNotify(object sender, EngineMessageArgs e)
         {
             Debug.WriteLine("Script Notify from _webView: " + e.Value);
         }
@@ -146,7 +157,7 @@ namespace Onitor
                         for (var i=0; i < t.length; i++) {
                             t[i].setAttribute('onitor-theme', 'dark');
                         }
-                    ";
+                        ";
 
                     await Task.Run(async () =>
                         await _webView.Dispatcher.RunAsync(CoreDispatcherPriority.Normal, () =>
@@ -161,7 +172,7 @@ namespace Onitor
                         for (var i=0; i < t.length; i++) {
                             t[i].setAttribute('onitor-theme', 'light');
                         }
-                    ";
+                        ";
 
                     await Task.Run(async () =>
                         await _webView.Dispatcher.RunAsync(CoreDispatcherPriority.Normal, () =>
@@ -171,16 +182,13 @@ namespace Onitor
             }
         }
 
-
-        private void _webView_FrameNavigationStarting(WebView sender, WebViewNavigationStartingEventArgs args)
+        private void _webView_FrameNavigationStarting(BrowserView sender, EngineNavStartingArgs args)
         {
             //CurrentSessionAdsBlocked = 0;
             var url = args.Uri;
 
-
-
             var allowed = BlockedDomains.IsUrlAllowed(url);
-            
+
             // fix whitelist stuff here
             if (!allowed /* && !whitelisted*/)
             {
@@ -195,69 +203,113 @@ namespace Onitor
         }
 
         string UserSelectedUserAgent { get; set; }
-        private void _webView_NavigationStarting(WebView sender, WebViewNavigationStartingEventArgs args)
+        private void _webView_NavigationStarting(BrowserView sender, EngineNavStartingArgs args)
         {
 
             //TODO: Fix some pages infinite loading and freezing UI
-            
+
             if (args.Uri != null)
             {
-
-
-                //setting user agent for mobile
-
-                string DeviceVersion = localSettings.Values["DeviceVersion"].ToString();
-                var result = localSettings.Values["SavedUserAgent"] as string;
-               var predefinedAgent = WhitelistedPages.CheckPageUserAgent(args.Uri.Host);
-                
-                if (predefinedAgent == null || predefinedAgent == "")
+                // The UA spoofing below rewrites the UA to old Edge/Chrome
+                // strings - that was needed on the frozen EdgeHTML engine, but
+                // would actively hurt the modern Chromium engine (sites would
+                // serve legacy bundles again). It is therefore legacy-only.
+                if (!sender.IsChromium)
                 {
-                    predefinedAgent = result;
-                }
-               // Debug.WriteLine("Predefined agent: " + predefinedAgent + "  Domain: " + args.Uri.Host);
-                if (predefinedAgent != null)
-                {
-                    if (DeviceVersion == "Mobile")
+                    //setting user agent for mobile
+
+                    string DeviceVersion = localSettings.Values["DeviceVersion"].ToString();
+                    var result = localSettings.Values["SavedUserAgent"] as string;
+                    var predefinedAgent = WhitelistedPages.CheckPageUserAgent(args.Uri.Host);
+
+                    if (predefinedAgent == null || predefinedAgent == "")
                     {
-                        UserSelectedUserAgent = UserAgent.ModifyUserAgent(false, predefinedAgent);
+                        predefinedAgent = result;
                     }
-                    else
+                    // Debug.WriteLine("Predefined agent: " + predefinedAgent + "  Domain: " + args.Uri.Host);
+                    if (predefinedAgent != null)
                     {
-                       
+                        if (DeviceVersion == "Mobile")
+                        {
+                            UserSelectedUserAgent = UserAgent.ModifyUserAgent(false, predefinedAgent);
+                        }
+                        else
+                        {
+
                             UserSelectedUserAgent = UserAgent.ModifyUserAgent(true, predefinedAgent);
-                       
-                    }
-                }
-                else
-                { 
-                    if (DeviceVersion == "Mobile")
-                    {
-                        // UserAgentManager.ChangeUserAgent(UserAgentManager.DeviceMode.Mobile);
-                        if (result != null)
-                        {
 
-                            UserSelectedUserAgent = UserAgent.ModifyUserAgent(false, result);
                         }
-                        else
-                        {
-                            UserSelectedUserAgent = UserAgent.ModifyUserAgent(false, "Windows");
-                        }
-
                     }
                     else
                     {
-                        if (result != null)
+                        if (DeviceVersion == "Mobile")
                         {
+                            // UserAgentManager.ChangeUserAgent(UserAgentManager.DeviceMode.Mobile);
+                            if (result != null)
+                            {
 
-                            UserSelectedUserAgent = UserAgent.ModifyUserAgent(true, result);
+                                UserSelectedUserAgent = UserAgent.ModifyUserAgent(false, result);
+                            }
+                            else
+                            {
+                                UserSelectedUserAgent = UserAgent.ModifyUserAgent(false, "Windows");
+                            }
+
                         }
                         else
                         {
-                            UserSelectedUserAgent = UserAgent.ModifyUserAgent(true, "Windows");
+                            if (result != null)
+                            {
+
+                                UserSelectedUserAgent = UserAgent.ModifyUserAgent(true, result);
+                            }
+                            else
+                            {
+                                UserSelectedUserAgent = UserAgent.ModifyUserAgent(true, "Windows");
+                            }
+                        }
+                    }
+                    UserAgent.SetUserAgent(UserSelectedUserAgent);
+                }
+
+                // --- YouTube compatibility (legacy engine only) ---------------
+                // EdgeHTML cannot run modern youtube.com. Route to the TV UI
+                // with a Smart-TV user agent (see Classes/YouTubeCompat.cs).
+                // On the Chromium engine YouTube runs natively - do nothing.
+                if (!sender.IsChromium && YouTubeCompat.IsYouTubeUrl(args.Uri))
+                {
+                    BlockedDomains.IsYouTubeContext = true;
+
+                    if (YouTubeCompat.UseInvidiousRedirect())
+                    {
+                        Uri instance = YouTubeCompat.GetInvidiousInstance();
+                        if (instance != null)
+                        {
+                            Uri invidiousUri = new Uri(instance, args.Uri.PathAndQuery);
+                            args.Cancel = true;
+                            sender.Source = invidiousUri;
+                            URL = invidiousUri;
+                            return;
+                        }
+                    }
+                    else
+                    {
+                        sender.SetUserAgent(YouTubeCompat.TvUserAgent);
+
+                        Uri tvUri;
+                        if (YouTubeCompat.TryRewriteToTv(args.Uri, out tvUri))
+                        {
+                            args.Cancel = true;
+                            sender.Source = tvUri;
+                            URL = tvUri;
+                            return;
                         }
                     }
                 }
-                UserAgent.SetUserAgent(UserSelectedUserAgent);
+                else if (!YouTubeCompat.IsYouTubeUrl(args.Uri))
+                {
+                    BlockedDomains.IsYouTubeContext = false;
+                }
 
                 //redirecting to real page
                 if (args.Uri.Scheme == "about" && args.Uri.Segments[0] == "home")
@@ -275,7 +327,7 @@ namespace Onitor
             //_webView.AddWebAllowedObject("TaskHandler", taskHandler); //initializing Webie handler
         }
 
-        private void _webView_ContentLoading(WebView sender, WebViewContentLoadingEventArgs args)
+        private void _webView_ContentLoading(BrowserView sender, EngineContentLoadingArgs args)
         {
             if (args.Uri != null)
             {
@@ -283,18 +335,9 @@ namespace Onitor
             }
         }
 
-        private async void _webView_FrameNavigationCompleted(WebView sender, WebViewNavigationCompletedEventArgs args)
+        private async void _webView_FrameNavigationCompleted(BrowserView sender, EngineNavCompletedArgs args)
         {
             IsPageHaveMedia = false;
-
-            /* AsyncEngine.ExecuteString(_webView.InvokeScriptAsync("eval", new[] { @"
-                 var videoElem = document.querySelector('video');
-                 var audioElem = document.querySelector('audio');
-                 if (videoElem !== null || audioElem !== null)
-                 {
-                     TaskHandler.sendData('PageHaveMedia');
-                 }
-             " })); //checks for a media */
 
             if (WhitelistedPages.CheckPageSettings(args.Uri.Host, true, false))
             {
@@ -307,13 +350,41 @@ namespace Onitor
 
             }
 
+            // Legacy engine + YouTube: force H.264 streams (Xbox One / phones
+            // have no VP9 hardware decode). Chromium negotiates this itself.
+            if (!sender.IsChromium && args.Uri != null && YouTubeCompat.IsYouTubeUrl(args.Uri))
+            {
+                try
+                {
+                    await sender.InvokeScriptAsync("eval", new string[] { YouTubeCompat.H264ForceScript });
+                }
+                catch (Exception) { }
+            }
+
+            // Chromium engine: bridge window.external.notify() to WebView2's
+            // postMessage so pages calling the legacy API still reach
+            // ScriptNotify.
+            if (sender.IsChromium && args.Uri != null)
+            {
+                try
+                {
+                    await sender.InvokeScriptAsync("eval", new string[] { @"
+                        (function () {
+                          try {
+                            if (window.chrome && window.chrome.webview && window.external && !window.external.notify) {
+                              window.external.notify = function (m) { window.chrome.webview.postMessage(String(m)); };
+                            }
+                          } catch (e) { }
+                        })();" });
+                }
+                catch (Exception) { }
+            }
 
         }
 
         Uri lastPage;
-        private async void _webView_NavigationCompleted(WebView sender, WebViewNavigationCompletedEventArgs args)
+        private async void _webView_NavigationCompleted(BrowserView sender, EngineNavCompletedArgs args)
         {
-           
 
 
             IsPageLoaded = true;
@@ -325,14 +396,13 @@ namespace Onitor
             {
                 URL = args.Uri;
             }
-            //StorageFile extJS = await StorageFile.GetFileFromApplicationUriAsync(new Uri("ms-appx:///ClassesJS/ExtensionUI.js"));
-            //StorageFile cmJS = await StorageFile.GetFileFromApplicationUriAsync(new Uri("ms-appx:///ClassesJS/ContextMenu.js"));
-           
+
             //initializing elements for manipulation
-            await sender.InvokeScriptAsync("eval", new[] { "document.body.style.zoom = '" + PageZoom + "';" });
-            //await sender.InvokeScriptAsync("eval", new[] { await FileIO.ReadTextAsync(extJS) });
-            //AsyncEngine.ExecuteString(sender.InvokeScriptAsync("eval", new[] { await FileIO.ReadTextAsync(cmJS) }));
-            
+            try
+            {
+                await sender.InvokeScriptAsync("eval", new[] { "document.body.style.zoom = '" + PageZoom + "';" });
+            }
+            catch (Exception) { }
 
             //error pages
             if (!args.IsSuccess)
@@ -342,7 +412,11 @@ namespace Onitor
                     if (NetworkInformation.GetInternetConnectionProfile() == null
                         || NetworkInformation.GetInternetConnectionProfile().GetNetworkConnectivityLevel() == NetworkConnectivityLevel.None)
                     {
-                        if ((lastPage != null && lastPage == args.Uri) || !ApiInformation.IsApiContractPresent("Windows.Foundation.UniversalApiContract", 6))
+                        if (sender.IsChromium)
+                        {
+                            sender.Source = new Uri("ms-appx-web:///PagesHTML/NoInternet.html#" + args.Uri);
+                        }
+                        else if ((lastPage != null && lastPage == args.Uri) || !ApiInformation.IsApiContractPresent("Windows.Foundation.UniversalApiContract", 6))
                         {
                             await sender.InvokeScriptAsync("eval", new[] { "window.location.replace('ms-appx-web:///PagesHTML/NoInternet.html#' + location.href);" });
                         }
@@ -355,7 +429,11 @@ namespace Onitor
                         || NetworkInformation.GetInternetConnectionProfile().GetNetworkConnectivityLevel() == NetworkConnectivityLevel.ConstrainedInternetAccess
                         || NetworkInformation.GetInternetConnectionProfile().GetNetworkConnectivityLevel() == NetworkConnectivityLevel.LocalAccess)
                     {
-                        if ((lastPage != null && lastPage == args.Uri) || !ApiInformation.IsApiContractPresent("Windows.Foundation.UniversalApiContract", 6))
+                        if (sender.IsChromium)
+                        {
+                            sender.Source = new Uri("ms-appx-web:///PagesHTML/NotFound.html#" + args.Uri);
+                        }
+                        else if ((lastPage != null && lastPage == args.Uri) || !ApiInformation.IsApiContractPresent("Windows.Foundation.UniversalApiContract", 6))
                         {
                             await sender.InvokeScriptAsync("eval", new[] { "window.location.replace('ms-appx-web:///PagesHTML/NotFound.html#' + location.href);" });
                         }
@@ -366,16 +444,10 @@ namespace Onitor
                     }
                 }
             }
-            
+
             lastPage = args.Uri;
 
-
-           
-
         }
-
-
-       
 
         private void WebView_Loaded(object sender, RoutedEventArgs e)
         {
@@ -384,7 +456,7 @@ namespace Onitor
 
         public bool IsWebViewLoaded { get; private set; } = false;
 
-        public WebView WebView
+        public BrowserView WebView
         {
             get
             {
@@ -409,149 +481,6 @@ namespace Onitor
             NotSupported,
             Light,
             Dark
-        }
-    }
-
-    public static class WebViewExtensions
-    {
-        #region "Media"
-
-        public async static void PlayMedia(this WebView webView)
-        {
-            string PlayScript =
-                @"
-                    if(document.body.getElementsByTagName('video').length > 0)
-                    {
-                        document.body.getElementsByTagName('video')[0].play();
-                    }
-                    else if(document.body.getElementsByTagName('audio').length > 0)
-                    {
-                        document.body.getElementsByTagName('audio')[0].play();
-                    }
-                ";
-
-            await webView.InvokeScriptAsync("eval", new string[] { PlayScript });
-        }
-
-        public async static void PauseMedia(this WebView webView)
-        {
-            string PauseScript =
-                @"
-                    if(document.body.getElementsByTagName('video').length > 0)
-                    {
-                        document.body.getElementsByTagName('video')[0].pause();
-                    }
-                    else if(document.body.getElementsByTagName('audio').length > 0)
-                    {
-                        document.body.getElementsByTagName('audio')[0].pause();
-                    }
-                ";
-
-            await webView.InvokeScriptAsync("eval", new string[] { PauseScript });
-        }
-
-        public static async Task<bool> IsPlayingVideo(this WebView webView)
-        {
-            string scriptJS = await webView.InvokeScriptAsync("eval", new string[] { @"
-                if(document.body.getElementsByTagName('video').length > 0) { 
-                    var video = document.body.getElementsByTagName('video')[0];
-                    if(video.currentTime > 0 && !video.paused && !video.ended && video.readyState > 2) { 'true' };
-                }
-            " });
-
-            return scriptJS == "true";
-        }
-
-        public static async Task<bool> IsPlayingAudio(this WebView webView)
-        {
-            string scriptJS = await webView.InvokeScriptAsync("eval", new string[] { @"
-                if(document.body.getElementsByTagName('audio').length > 0) {
-                    var audio = document.body.getElementsByTagName('audio')[0];
-                    if(audio.currentTime > 0 && !audio.paused && !audio.ended && audio.readyState > 2) { 'true' };
-                }
-            " });
-
-            return scriptJS == "true";
-        }
-
-        #endregion
-
-        public static string Domain(this WebView webView, string sub)
-        {
-            string[] subdomain = sub.Split('.');
-            string domain = sub;
-            if (domain.Contains('.'))
-            {
-                domain = string.Format("{0}.{1}", subdomain[subdomain.Length - 2], subdomain[subdomain.Length - 1]);
-            }
-
-            return domain;
-        }
-
-
-        public static async Task<bool> IsFocusedElementEditiable(this WebView webView)
-        {
-            IAsyncOperation<string> jsEdit = webView.InvokeScriptAsync("eval", new string[] { @"
-                const elem = document.activeElement;
-                var textControls = ['text', 'search', 'url'];
-                if(elem.tagName === 'TEXTAREA' || (elem.tagName === 'INPUT' && textControls.indexOf(elem.type) != -1))
-                {
-                    'true';
-                }
-            " });
-
-            return await jsEdit == "true";
-        }
-
-        public static async void FocusOnPointer(this WebView webView, int X, int Y)
-        {
-            await webView.InvokeScriptAsync("eval", new string[] { @" document.elementFromPoint(" + X + ", " + Y + ").focus(); " });
-        }
-
-        public static async Task<string> ActiveElement(this WebView webView)
-        {
-            return await webView.InvokeScriptAsync("eval", new string[] { @" document.activeElement " });
-        }
-
-        public static async Task<string> ActiveElementTagName(this WebView webView)
-        {
-            return await webView.InvokeScriptAsync("eval", new string[] { @" document.activeElement.tagName " });
-        }
-
-        public static async Task<string> ActiveElementLink(this WebView webView)
-        {
-            if (await ActiveElementTagName(webView) == "A" || await ActiveElementTagName(webView) == "a")
-            {
-                string Link = await webView.InvokeScriptAsync("eval", new string[] { @" document.activeElement.href.toString() " });
-                if (Link.Length > 0)
-                {
-                    var CustErr = new MessageDialog($"Clicked Link: " + Link);
-                    CustErr.Commands.Add(new UICommand("Close"));
-                    await CustErr.ShowAsync();
-                    return Link;
-                }
-            }
-            return null;
-        }
-
-        public static async Task<string> SelectionText(this WebView webView)
-        {
-            string selectionText;
-            if (await webView.IsFocusedElementEditiable())
-            {
-                selectionText = await webView.InvokeScriptAsync("eval", new string[] { @"
-                    var elem = document.activeElement;
-                    elem.value.substring(elem.selectionStart, elem.selectionEnd);
-                " });
-            }
-            else
-            {
-                selectionText = await webView.InvokeScriptAsync("eval", new string[] { @"
-                     window.getSelection().toString();
-                " });
-            }
-
-            return selectionText;
         }
     }
 }
