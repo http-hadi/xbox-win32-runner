@@ -1,0 +1,65 @@
+name: Build Onitor UWP (x64)
+
+on:
+  push:
+    branches: [master, main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 120
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Ensure VS2022 UWP workload + C++ UWP build tools (idempotent)
+        shell: powershell
+        timeout-minutes: 45
+        continue-on-error: true
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vsPath = & $vswhere -latest -products * -requires Microsoft.Component.MSBuild -property installationPath | Select-Object -First 1
+          Write-Host "VS installation: $vsPath"
+          if (-not $vsPath) { throw "No Visual Studio installation found" }
+          $setup = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\setup.exe'
+          $argString = "modify --installPath `"$vsPath`" --add Microsoft.VisualStudio.Workload.Universal --add Microsoft.VisualStudio.ComponentGroup.UWP.VC.BuildTools --add Microsoft.VisualStudio.Component.VC.Tools.x86.x64 --includeRecommended --quiet --norestart --nocache"
+          Write-Host "Running: setup.exe $argString"
+          $p = Start-Process -FilePath $setup -ArgumentList $argString -Wait -PassThru
+          Write-Host "setup.exe exit code: $($p.ExitCode)"
+          if ($p.ExitCode -notin 0,3010,740,8200) { throw "VS modify failed with exit code $($p.ExitCode)" }
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Create self-signed code signing certificate
+        shell: powershell
+        run: |
+          $sec = ConvertTo-SecureString -String 'onitor-dev-2026' -Force -AsPlainText
+          $cert = New-SelfSignedCertificate -Type Custom -Subject 'CN=Empyreal96' -KeyUsage DigitalSignature -KeyAlgorithm RSA -KeyLength 2048 -CertStoreLocation 'Cert:\CurrentUser\My' -FriendlyName 'Onitor dev build' -TextExtension @('2.5.29.37={text}1.3.6.1.5.5.7.3.3','2.5.29.19={text}')
+          Export-Certificate -Cert $cert -FilePath OnitorDev.cer
+          Export-PfxCertificate -Cert $cert -FilePath OnitorDev.pfx -Password $sec
+          Write-Host "Generated signing cert: $($cert.Subject) thumbprint $($cert.Thumbprint)"
+
+      - name: Restore NuGet packages
+        shell: cmd
+        run: msbuild onitor\onitor\OnitorBrowser.csproj /t:Restore /p:Configuration=Release /p:Platform=x64 /nologo /v:m
+
+      - name: Build x64 sideload package
+        shell: cmd
+        run: msbuild onitor\onitor\OnitorBrowser.csproj /p:Configuration=Release /p:Platform=x64 /p:AppxBundle=Always /p:AppxBundlePlatforms=x64 /p:UapAppxPackageBuildMode=Sideload /p:AppxPackageDir="%GITHUB_WORKSPACE%\packages" /p:PackageCertificateKeyFile="%GITHUB_WORKSPACE%\OnitorDev.pfx" /p:PackageCertificatePassword=onitor-dev-2026 /p:PackageCertificateThumbprint= /p:AppxSymbolPackageEnabled=false /m /nologo /v:m
+
+      - name: Stage packages with install docs and cert
+        shell: powershell
+        run: |
+          if (Test-Path README-INSTALL.txt) { Copy-Item README-INSTALL.txt packages\ }
+          Copy-Item OnitorDev.pfx packages\
+          Copy-Item OnitorDev.cer packages\
+          Get-ChildItem -Recurse "$env:GITHUB_WORKSPACE\packages" | ForEach-Object { Write-Host $_.FullName }
+
+      - name: Upload sideload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: onitor-uwp-x64-sideload
+          path: packages
+          if-no-files-found: error
