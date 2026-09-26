@@ -40,9 +40,9 @@ Notes for Xbox:
   Engine Mode = Legacy to use the TV-optimized YouTube interface.
 
 
-WebGPU / WEBNN (AI MODELS IN THE BROWSER) - new in 1.2.0.0
+WebGPU / WEBNN (AI MODELS IN THE BROWSER) - new in 1.3.0.0
 ----------------------------------------------------------
-WebGPU (and the WebNN feature names) are now enabled by default in the
+WebGPU (and the WebNN feature names) are enabled by default in the
 Chromium engine. WebView2 does not have edge://flags / chrome://flags -
 those internal pages only exist in full browsers - so the equivalent is
 done by the app itself via browser launch arguments, set before the first
@@ -50,17 +50,34 @@ WebView2 environment is created (WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS).
 
 What to expect per device:
 - WINDOWS 10/11 DESKTOP: full hardware-accelerated WebGPU through the
-  Evergreen WebView2 runtime (your PC's GPU). Flags used:
+  Evergreen WebView2 runtime (your PC's GPU, D3D12). Flags used:
   --enable-unsafe-webgpu --enable-features=WebGPU,msWebNN,WebNNAPI
-- XBOX DEV MODE: Chromium's WebGPU stack (Dawn) has no Xbox D3D12
-  backend, so a hardware WebGPU adapter is impossible today. The app
-  therefore ALSO passes --use-webgpu-adapter=swiftshader which guarantees
-  a software (CPU) WebGPU adapter: sites like webml.ai/playground will
-  detect WebGPU, load their "GPU shader" models and run them - on the
-  CPU. Small models (tiny LLMs, Whisper-tiny, embeddings) are usable;
-  big ones will be slow. Plus --ignore-gpu-blocklist and
-  --enable-unsafe-swiftshader to try hardware compositing/WebGL first
-  and fall back to software only if that fails.
+- XBOX DEV MODE - GPU MODE (default): Dawn (Chromium's WebGPU stack)
+  has no Xbox D3D12 backend, but its D3D11 backend is compiled into
+  every Windows build and D3D11 IS available to UWP apps on the
+  console (the same API the WebGL/ANGLE layer uses). The app therefore
+  passes  --use-webgpu-adapter=d3d11 --use-angle=d3d11
+  --ignore-gpu-blocklist  to run WebGPU on the REAL console GPU.
+- XBOX DEV MODE - CPU MODE (automatic fallback): if the console
+  cannot provide a D3D11 WebGPU adapter, the app detects this at
+  startup (it asks the browser for an adapter and inspects the
+  answer), writes "cpu" into webgpu-mode.txt, restarts ONCE and
+  comes up with a guaranteed SwiftShader software adapter instead -
+  models then load and run on the CPU (slow but reliable).
+
+Every launch is logged to  webgpu-status.txt  in the app's LocalState
+folder (Xbox Device Portal -> File explorer), telling you exactly
+which adapter the browser got: "Hardware WebGPU adapter is ACTIVE"
+means the console GPU is doing the work.
+
+WebGPU sites to try:
+  https://webml.ai/playground          (AI models in the browser)
+  https://webgpu.github.io/webgpu-samples/  (samples - the "Hardware Adapter"
+     sample shows which adapter is active)
+
+To retry the hardware path after a fallback happened: delete
+webgpu-mode.txt (or set its content to "gpu") in the app's LocalState
+folder via Device Portal, then restart the app.
 
 CHANGING FLAGS WITHOUT A REBUILD (power users)
 ----------------------------------------------
@@ -69,9 +86,17 @@ its entire content is used verbatim as the WebView2 browser arguments
 (replacing the built-in defaults). On Xbox, browse to
 http://<console-ip>:11443 (Device Portal) -> File explorer -> find the
 Onitor app's LocalState folder -> create/edit browser-flags.txt, then
-restart the app. Example contents to attempt hardware WebGPU instead of
-SwiftShader:
-    --enable-unsafe-webgpu --ignore-gpu-blocklist
+restart the app. Useful recipes:
+
+  Hardware WebGPU attempt (the new default):
+    --enable-unsafe-webgpu --use-webgpu-adapter=d3d11 --use-angle=d3d11 --ignore-gpu-blocklist --enable-unsafe-swiftshader
+  Guaranteed software WebGPU (old 1.2.0.0 behaviour):
+    --enable-unsafe-webgpu --use-webgpu-adapter=swiftshader --enable-unsafe-swiftshader
+  Force WebGPU compatibility profile (lighter feature set, more
+  adapters pass validation):
+    --enable-unsafe-webgpu --use-webgpu-adapter=d3d11 --force-webgpu-compat --use-angle=d3d11 --ignore-gpu-blocklist
+  WebGPU + WebNN feature names:
+    --enable-unsafe-webgpu --enable-features=WebGPU,msWebNN,WebNNAPI --use-webgpu-adapter=d3d11 --ignore-gpu-blocklist
 Delete the file (or empty it) to return to the built-in defaults.
 
 
@@ -136,3 +161,9 @@ WHAT WAS CHANGED vs original Onitor
 - NEW 1.2.0.0: WebGPU enabled in the Chromium engine via
   WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS (no edge://flags in WebView2),
   plus WebNN feature names for Edge/Chromium runtimes.
+- NEW 1.3.0.0: HARDWARE WebGPU attempt on Xbox via Dawn's D3D11 backend
+  (--use-webgpu-adapter=d3d11, parsed by Chromium's own
+  service_utils.cc) with adaptive startup probe: if no GPU adapter is
+  available the app auto-falls back to a guaranteed SwiftShader adapter
+  (webgpu-mode.txt) and restarts once. All decisions logged to
+  webgpu-status.txt. Desktop hardware WebGPU unchanged (D3D12).
