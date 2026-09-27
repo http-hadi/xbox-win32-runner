@@ -308,6 +308,20 @@ namespace onitor.Classes
         // restarts itself once per rung, so the best available backend
         // always wins in the end.
         //
+        // PROBE MECHANICS (v1.5.1.0 - CRITICAL FIX): WebView2's
+        // ExecuteScriptAsync does NOT await Promises - a script whose value
+        // is a Promise returns the JSON serialization of the Promise OBJECT,
+        // the literal string "{}" (WebView2Feedback issue #2295). The probe
+        // used to be exactly such a Promise-returning IIFE, so every probe
+        // since v1.3.0.0 returned "{}", matched no outcome branch, and the
+        // ladder SILENTLY FROZE on rung 1 - the GLES rung never ran once
+        // (webgpu-status.txt: "probe result={} mode=auto-d3d11"). The probe
+        // now uses a kick+poll pattern: an idempotent script stores the
+        // final adapter verdict in window.__onitorWgpuProbe as a PLAIN
+        // STRING, and the host polls that script until the value stops
+        // being 'pending'. No Promise ever crosses the boundary, and any
+        // unknown probe value is logged instead of being ignored.
+        //
         // HONEST SOFTWARE DETECTION (v1.5.0.0): an adapter is software if
         // isFallback/isFallbackAdapter is set OR its description/
         // architecture/vendor matches SwiftShader/llvmpipe/Basic
@@ -318,10 +332,12 @@ namespace onitor.Classes
         //
         // LADDER GENERATIONS: webgpu-ladder-gen.txt records which ladder
         // generation this console last ran (bump CurrentLadderGeneration
-        // whenever a rung is added/moved). On mismatch: a console that had
-        // already settled on "auto-cpu" resumes directly at the first NEW
-        // rung (no re-running of already-failed rungs); anything else
-        // restarts the ladder from rung 1; user pins always survive.
+        // whenever a rung is added/moved). On mismatch: consoles in ANY auto
+        // state (settled on SwiftShader OR frozen mid-ladder by the broken
+        // v1.5.0.0 probe) resume directly at the GLES rung - D3D11/D3D12 are
+        // source-verified forced-SwiftShader on Xbox, so nothing worth
+        // retrying is skipped; user pins always survive; fresh consoles
+        // (v1.5.1.0) also START at the GLES rung.
         //
         // User control via <LocalState>\webgpu-mode.txt (Device Portal):
         //   "auto" (or delete the file) - restart the ladder at rung 1
@@ -365,11 +381,12 @@ namespace onitor.Classes
         private const string StatusFileName = "webgpu-status.txt";
 
         // Records which ladder generation ran last. Bump the value whenever
-        // a rung is added/moved - consoles that already settled on "auto-cpu"
-        // then resume directly at the newest rung instead of re-running the
-        // rungs that already failed there.
+        // the rung set or startup behaviour changes - consoles coming from
+        // an older generation (including the probe-frozen gen2 consoles)
+        // resume directly at the GLES rung instead of re-running rungs that
+        // already failed there.
         private const string LadderGenFileName = "webgpu-ladder-gen.txt";
-        private const string CurrentLadderGeneration = "gen2-1.5.0.0";
+        private const string CurrentLadderGeneration = "gen3-1.5.1.0";
 
         /// <summary>
         /// Persisted WebGPU strategy (webgpu-mode.txt). "auto-*" values are
@@ -380,7 +397,7 @@ namespace onitor.Classes
         /// </summary>
         private enum WebGpuMode
         {
-            FreshAuto,    // no / unknown file -> launch rung 1 (d3d11)
+            FreshAuto,    // no / unknown file -> start at the GLES rung (v1.5.1.0)
             AutoD3D11,    // ladder rung 1 running
             AutoD3D12,    // ladder rung 2 running
             AutoGles,     // ladder rung 3 running (GLES via ANGLE)
@@ -584,11 +601,17 @@ namespace onitor.Classes
                 WebGpuMode mode = ReadWebGpuMode();
                 if (mode == WebGpuMode.FreshAuto)
                 {
-                    // Fresh ladder: start at rung 1 and persist the rung so
-                    // the startup probe knows which backend this process is
-                    // running (and so v1.3.0.0 leftovers get re-laddered).
-                    mode = WebGpuMode.AutoD3D11;
-                    TrySetWebGpuMode("auto-d3d11");
+                    // Fresh ladder (v1.5.1.0): start DIRECTLY at the GLES
+                    // rung and persist it so the startup probe knows which
+                    // backend this process is running. D3D11 and D3D12 are
+                    // skipped: on Xbox Chromium's webgpu_decoder_impl.cc
+                    // force-replaces both with SwiftShader (unknown GPU ->
+                    // software-marked feature list -> force_fallback_adapter
+                    // for everything except kOpenGLES), and with the probe
+                    // now actually working the first restart-worthy backend
+                    // is GLES anyway.
+                    mode = WebGpuMode.AutoGles;
+                    TrySetWebGpuMode("auto-gles");
                 }
 
                 if (mode == WebGpuMode.AutoCpu)
@@ -651,11 +674,15 @@ namespace onitor.Classes
             WebGpuMode mode = ReadWebGpuModeFile();
             if (!LadderGenerationIsCurrent())
             {
-                if (mode == WebGpuMode.AutoCpu)
+                if (mode == WebGpuMode.AutoCpu || mode == WebGpuMode.AutoD3D11 ||
+                    mode == WebGpuMode.AutoD3D12 || mode == WebGpuMode.AutoGles)
                 {
-                    // Previous ladder ran to completion here (settled on
-                    // SwiftShader): resume directly at the first NEW rung
-                    // instead of re-running rungs that already failed.
+                    // Previous generation in ANY auto state - settled on
+                    // SwiftShader, or frozen mid-ladder by the broken v1.5.0.0
+                    // probe ("probe result={}" matched no branch, so the
+                    // ladder never advanced) - resumes directly at the GLES
+                    // rung. D3D11/D3D12 are known forced-SwiftShader on Xbox;
+                    // user pins always survive below.
                     mode = WebGpuMode.AutoGles;
                     TrySetWebGpuMode("auto-gles");
                 }
@@ -663,8 +690,9 @@ namespace onitor.Classes
                          mode != WebGpuMode.PinnedD3D12 &&
                          mode != WebGpuMode.PinnedGles)
                 {
-                    // Never started, or mid-ladder of an older generation:
-                    // start over from rung 1 (user pins survive).
+                    // Never started: start at the GLES rung (user pins
+                    // survive; FreshAuto is converted in
+                    // ComputeBrowserArguments).
                     mode = WebGpuMode.FreshAuto;
                 }
                 TryWriteLadderGeneration();
@@ -1025,9 +1053,10 @@ namespace onitor.Classes
         }
 
         // --------------------------------------------------------------------
-        // Adaptive WebGPU startup (v1.4.0.0 ladder). Browser flags are fixed
-        // for the life of the process, so we verify what the browser actually
-        // ended up with by asking the page for an adapter. Probe outcomes:
+        // Adaptive WebGPU startup (v1.4.0.0 ladder, probe fixed in v1.5.1.0).
+        // Browser flags are fixed for the life of the process, so we verify
+        // what the browser actually ended up with by asking the page for an
+        // adapter. Probe outcomes:
         //   "gpu:<desc>"      -> hardware adapter active - ladder done, the
         //                        current rung is sticky for future launches.
         //   "fallback:<desc>" -> adapter active but a CPU fallback
@@ -1036,11 +1065,30 @@ namespace onitor.Classes
         //   "null"            -> no adapter at all - same ladder advance.
         //   "none"            -> navigator.gpu missing: flags were not applied
         //                        at all (env var blocked?) - logged only.
-        //   "error"           -> probe raced with navigation - retried next
-        //                        launch.
+        //   "error"           -> requestAdapter rejected - logged, retried
+        //                        next launch.
+        //   "inconclusive"    -> adapter request did not settle within the
+        //                        polling window (or an unexpected value came
+        //                        back) - retried next launch.
         // Restarts happen at most ONCE per process and only after the mode
         // file change has been VERIFIED (TrySetWebGpuMode read-back), so the
         // ladder can never restart-loop.
+        //
+        // WHY KICK+POLL (the v1.5.1.0 fix): WebView2's ExecuteScriptAsync
+        // does NOT await Promises. A script whose value is a Promise returns
+        // the JSON serialization of the Promise OBJECT itself - the literal
+        // string "{}" (WebView2Feedback issue #2295). The probe used to
+        // return requestAdapter().then(...), i.e. a Promise, so every probe
+        // from v1.3.0.0 to v1.5.0.0 came back as "{}", matched no outcome
+        // branch, and the ladder silently froze on rung 1 - the GLES rung
+        // never ran once (user's webgpu-status.txt: "probe result={}
+        // mode=auto-d3d11"). The probe now works differently: one idempotent
+        // script starts requestAdapter AT MOST once per page and stores the
+        // verdict in window.__onitorWgpuProbe as a PLAIN STRING; the host
+        // executes that same script repeatedly (it doubles as the poll) and
+        // reads the string. No Promise ever crosses the ExecuteScriptAsync
+        // boundary, and the script re-kicks itself after a navigation
+        // (fresh window global), so a racing navigation cannot kill it.
         // --------------------------------------------------------------------
         private static async void ProbeWebGpuAndAdaptAsync(Mux.WebView2 view)
         {
@@ -1057,44 +1105,109 @@ namespace onitor.Classes
                 // NAME (SwiftShader/llvmpipe/Basic Render/WARP) - otherwise a
                 // forced SwiftShader adapter is misreported as hardware
                 // (the v1.4.0.0 badge bug).
-                string probeJs =
+                string kickPollJs =
                     "(function(){" +
-                    "  if (!navigator.gpu) return 'none';" +
-                    "  try { return navigator.gpu.requestAdapter().then(" +
-                    "    function(a){" +
-                    "      if (!a) return 'null';" +
-                    "      var fb=false; try { fb = !!(a.isFallback || a.isFallbackAdapter); } catch(e){}" +
-                    "      var d='',v='';" +
-                    "      try { var i=a.info||{}; d=i.description||''; v=(i.architecture||'')+' '+(i.vendor||'');" +
-                    "        if(!d && !v && typeof a.requestAdapterInfo==='function'){ var ri=a.requestAdapterInfo(); if(ri){ d=ri.description||''; v=(ri.architecture||'')+' '+(ri.vendor||''); } } } catch(e){}" +
-                    "      var soft = fb || /swiftshader|software|llvmpipe|basic render|warp/i.test(d+' '+v);" +
-                    "      return (soft?'fallback:':'gpu:') + String(d||v).slice(0,90);" +
-                    "    }," +
-                    "    function(){ return 'error'; });" +
+                    "  try {" +
+                    "    if (!navigator.gpu) { window.__onitorWgpuProbe = 'none'; return 'none'; }" +
+                    "    var cur = window.__onitorWgpuProbe;" +
+                    "    if (typeof cur === 'string' && cur.length > 0) return cur;" +
+                    "    window.__onitorWgpuProbe = 'pending';" +
+                    "    navigator.gpu.requestAdapter().then(function(a){" +
+                    "      try {" +
+                    "        if (!a) { window.__onitorWgpuProbe = 'null'; return; }" +
+                    "        var fb=false; try { fb = !!(a.isFallback || a.isFallbackAdapter); } catch(e){}" +
+                    "        var d='',ar='',vn='';" +
+                    "        try { var i=a.info||{}; d=i.description||''; ar=i.architecture||''; vn=i.vendor||'';" +
+                    "          if(!d && !ar && !vn && typeof a.requestAdapterInfo==='function'){ var ri=a.requestAdapterInfo(); if(ri){ d=ri.description||''; ar=ri.architecture||''; vn=ri.vendor||''; } } } catch(e){}" +
+                    "        var v=(ar?ar+' ':'')+vn;" +
+                    "        var soft = fb || /swiftshader|software|llvmpipe|basic render|warp/i.test(d+' '+v);" +
+                    "        window.__onitorWgpuProbe = (soft?'fallback:':'gpu:') + String(d||v).slice(0,90);" +
+                    "      } catch(e){ window.__onitorWgpuProbe = 'error'; }" +
+                    "    }, function(){ window.__onitorWgpuProbe = 'error'; });" +
+                    "    return 'pending';" +
                     "  } catch (e) { return 'error'; }" +
                     "})()";
 
-                string raw = await view.ExecuteScriptAsync(probeJs);
-                string result = NormalizeScriptResult(raw);
-
-                string kind = result ?? string.Empty;
-                string desc = string.Empty;
-                int split = kind.IndexOf(':');
-                if (split > 0)
+                // Poll the kick/poll script: first call starts the adapter
+                // request (returns 'pending'), later calls just read the
+                // global. ~10.8s total window for the GPU process to
+                // enumerate adapters (first-ever GLES/ANGLE init can be
+                // slow), then we give up as inconclusive and try again on
+                // the next launch - the mode file is NOT advanced in that
+                // case, so nothing is skipped.
+                string result = null;
+                const int MaxPollAttempts = 18;
+                for (int attempt = 0; attempt < MaxPollAttempts && result == null; attempt++)
                 {
-                    desc = kind.Substring(split + 1);
-                    kind = kind.Substring(0, split);
+                    if (attempt > 0) await Task.Delay(600);
+                    try
+                    {
+                        string raw = await view.ExecuteScriptAsync(kickPollJs);
+                        string current = NormalizeScriptResult(raw);
+                        if (string.IsNullOrEmpty(current)) continue; // global not set yet
+                        if (current == "pending") continue;          // request still in flight
+                        result = current;
+                    }
+                    catch (Exception)
+                    {
+                        // Navigation raced with this poll - the next attempt
+                        // re-kicks on whatever page the tab is on then.
+                    }
+                }
+
+                string kind;
+                string desc;
+                if (result == null)
+                {
+                    kind = "inconclusive";
+                    desc = string.Empty;
+                }
+                else
+                {
+                    kind = result;
+                    desc = string.Empty;
+                    int split = kind.IndexOf(':');
+                    if (split > 0)
+                    {
+                        desc = kind.Substring(split + 1);
+                        kind = kind.Substring(0, split);
+                    }
                 }
                 if (kind.Length == 0) kind = "inconclusive";
 
+                // Runtime identification (v1.5.1.0): the exact WebGPU
+                // fallback logic in webgpu_decoder_impl.cc depends on the
+                // Chromium version, so every probe line now records the
+                // browser's Chromium version from the user agent.
+                string chromiumVersion = string.Empty;
+                try
+                {
+                    string ua = NormalizeScriptResult(
+                        await view.ExecuteScriptAsync("navigator.userAgent")) ?? string.Empty;
+                    int c = ua.IndexOf("Chrome/", StringComparison.OrdinalIgnoreCase);
+                    if (c >= 0)
+                    {
+                        System.Text.StringBuilder v = new System.Text.StringBuilder();
+                        for (int i = c + 7; i < ua.Length; i++)
+                        {
+                            char ch = ua[i];
+                            if ((ch >= '0' && ch <= '9') || ch == '.') { v.Append(ch); }
+                            else break;
+                        }
+                        string vs = v.ToString().TrimEnd('.');
+                        if (vs.Length > 0) chromiumVersion = " chromium=" + vs;
+                    }
+                }
+                catch (Exception) { }
+
                 WebGpuMode mode = ReadWebGpuMode();
-                if (mode == WebGpuMode.FreshAuto) mode = WebGpuMode.AutoD3D11; // fresh always launches rung 1
+                if (mode == WebGpuMode.FreshAuto) mode = WebGpuMode.AutoGles; // fresh starts at the GLES rung (v1.5.1.0)
                 bool isXbox = IsXboxDevice();
 
                 Debug.WriteLine("[Onitor] WebGPU probe: " + kind + " ('" + desc + "') mode=" + ModeName(mode));
                 AppendWebGpuStatus("probe result=" + kind +
                     (desc.Length > 0 ? " adapter='" + desc + "'" : string.Empty) +
-                    " mode=" + ModeName(mode) + " xbox=" + isXbox);
+                    " mode=" + ModeName(mode) + " xbox=" + isXbox + chromiumVersion);
 
                 if (kind == "gpu")
                 {
@@ -1143,7 +1256,16 @@ namespace onitor.Classes
                 }
                 else if (kind == "error" || kind == "inconclusive")
                 {
-                    AppendWebGpuStatus("probe " + kind + " (navigation race) - will retry next launch.");
+                    AppendWebGpuStatus("probe " + kind + " (adapter request failed or timed out) - will retry next launch.");
+                }
+                else
+                {
+                    // v1.5.1.0 guard: an unexpected probe value must NEVER
+                    // be silently ignored - a script returning something we
+                    // did not anticipate is exactly how the "{}" Promise
+                    // serialization froze the ladder for three versions.
+                    AppendWebGpuStatus("probe returned unexpected value '" + kind +
+                        "' - treated as inconclusive, will retry next launch.");
                 }
             }
             catch (Exception ex)
