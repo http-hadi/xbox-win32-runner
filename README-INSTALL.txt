@@ -40,7 +40,7 @@ Notes for Xbox:
   Engine Mode = Legacy to use the TV-optimized YouTube interface.
 
 
-WebGPU / WEBNN (AI MODELS IN THE BROWSER) - improved in 1.5.1.0
+WebGPU / WEBNN (AI MODELS IN THE BROWSER) - rebuilt in 1.6.0.0
 ----------------------------------------------------------
 WebGPU (and the WebNN feature names) are enabled by default in the
 Chromium engine. WebView2 does not have edge://flags / chrome://flags -
@@ -48,7 +48,47 @@ those internal pages only exist in full browsers - so the equivalent is
 done by the app itself via browser launch arguments, set before the first
 WebView2 environment is created (WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS).
 
-THE CRITICAL 1.5.1.0 FIX - the startup probe never worked before:
+THE 1.6.0.0 REBUILD - why every previous version ended on SwiftShader:
+Your 1.5.1.0 debug upload (webgpu-status.txt + chromium.log) allowed the
+WHOLE fallback chain to be verified against the exact engine source on
+your console (Chromium 150.0.7871.212, Dawn pin d089fc91). Three facts
+fell out of it:
+1. The GLES rung could never work: Dawn's build config
+   (dawn_features.gni, "Disables OpenGLES when compiling for UWP")
+   compiles the OpenGLES backend OUT of the Windows-UWP WebView2 runtime
+   your Xbox uses. Enumerating GLES adapters returns nothing, and
+   Chromium's WebGPU decoder then silently falls through to its tail
+   fallback: Vulkan + forceFallbackAdapter = SwiftShader. That is the
+   'swiftshader google' adapter every probe saw.
+2. The D3D11/D3D12 rungs never actually ran with a working probe: the
+   1.5.1.0 ladder skipped them entirely (they were written off based on
+   the same fallback-forcing that the flags below now bypass), and
+   before that the broken probe froze the ladder before reaching them.
+3. The forcing itself is avoidable: --ignore-gpu-blocklist skips the
+   entire GPU blocklist in the BROWSER process (gpu_util.cc), so
+   ACCELERATED_WEBGPU stays "Enabled" instead of "software" and the
+   force-to-SwiftShader override never engages. --enable-unsafe-webgpu
+   (already present since 1.3.0.0) additionally disables the adapter-
+   level blocklist. Both switches reach the GPU process inside the
+   serialized --gpu-preferences blob, immune to GPU-process switch
+   filtering. With the forcing gone, Chromium's Windows DEFAULT adapter
+   request is a REAL hardware enumeration on the D3D12 backend - the
+   console's native GPU API, zero translation layers.
+
+What this means for YOUR console after installing 1.6.0.0:
+- First launch: rung 1 = Dawn D3D12, native console GPU, no forced
+  fallback (first time this configuration has EVER run - it was skipped
+  by every previous version).
+- Green badge -> real console-GPU WebGPU, done.
+- Amber -> one restart onto rung 2 (Dawn D3D11, the same D3D11 layer
+  your WebGL already uses), then rung 3 (GLES, diagnostics only), then
+  the guaranteed SwiftShader rung.
+- chromium.log now records INFO-level messages too (--log-level=0), so
+  if everything still lands on SwiftShader the log will contain the
+  Dawn adapter-enumeration lines that say exactly why - send
+  webgpu-status.txt + chromium.log again.
+
+History - the critical 1.5.1.0 probe fix (kept for reference):
 The app verifies at startup which adapter the browser actually got by
 running a small script that calls navigator.gpu.requestAdapter(). Up to
 1.5.0.0 that script returned its answer as a JavaScript Promise - but
@@ -62,11 +102,10 @@ in webgpu-status.txt was "probe result={} mode=auto-d3d11"). 1.5.1.0
 replaces the mechanism: the script stores its verdict in a page global
 as a plain string and the app polls for it - no Promise crosses the
 boundary, any unexpected value is logged instead of ignored, and every
-probe line now also records the browser's Chromium version. In addition,
-fresh and upgraded consoles now start DIRECTLY at the OpenGLES rung
-(D3D11/D3D12 are known to be force-replaced by SwiftShader on Xbox).
+probe line now also records the browser's Chromium version.
 
-What this means for YOUR console after installing 1.5.1.0:
+What this means for YOUR console after installing 1.5.1.0 (superseded by
+1.6.0.0 above - kept for reference):
 - The very first launch runs the OpenGLES rung (--use-webgpu-adapter=
   opengles, routed through ANGLE's hardware D3D11 device - the same
   device your WebGL already uses, as the badge's "WebGL: hardware"
@@ -93,32 +132,27 @@ What to expect per device:
 - WINDOWS 10/11 DESKTOP: full hardware-accelerated WebGPU through the
   Evergreen WebView2 runtime (your PC's GPU, D3D12). Flags used:
   --enable-unsafe-webgpu --enable-features=WebGPU,msWebNN,WebNNAPI
-- XBOX DEV MODE - automatic hardware ladder: the app tries REAL-GPU
-  backends until one works:
-    1) Dawn OpenGLES backend (--use-webgpu-adapter=opengles) - routed
-       through ANGLE's hardware D3D11 device, i.e. the same device
-       WebGL already uses. This is the KEY rung: Chromium's
-       webgpu_decoder_impl.cc force-replaces the adapter with the
-       SwiftShader fallback whenever the GPU feature list marks
-       ACCELERATED_WEBGPU as software (the Xbox GPU is unknown to it)
-       - for every adapter type EXCEPT kOpenGLES, which is explicitly
-       exempt from that forcing. GLES is therefore currently the only
-       route that can hand WebGPU a real console GPU on Xbox.
-       (1.5.1.0: consoles start here directly - the D3D11/D3D12 rungs
-       below are only reachable by pinning them by hand.)
-    2) Dawn D3D11 backend (--use-webgpu-adapter=d3d11) - force-replaced
-       by SwiftShader on Xbox by the Chromium fallback logic above;
-       kept as a pinnable option.
-    3) Dawn D3D12 backend (Chromium's Windows default) - same forced
-       fallback; pinnable.
+- XBOX DEV MODE - automatic hardware ladder (1.6.0.0 order): the app
+  tries REAL-GPU backends until one works:
+    1) Dawn D3D12 backend (no --use-webgpu-adapter switch = Chromium's
+       Windows default) - the console's NATIVE GPU API, zero translation
+       layers, run with the blocklist bypass so no forced fallback can
+       engage. First time this configuration has ever run on the console
+       (previous versions skipped it / their probe was broken).
+    2) Dawn D3D11 backend (--use-webgpu-adapter=d3d11) - the same D3D11
+       layer ANGLE uses for your hardware WebGL (11on12 on the console).
+    3) Dawn OpenGLES backend (--use-webgpu-adapter=opengles) - kept for
+       diagnostics only: Dawn's build config compiles the OpenGLES
+       backend out of Windows-UWP WebView2 runtimes, so on the console
+       this rung is expected to fall through to SwiftShader.
     4) SwiftShader software adapter (--use-webgpu-adapter=swiftshader)
        - guaranteed last resort: models load and run on the CPU.
   At startup the app asks the browser for an adapter (the fixed
   kick+poll probe); while a hardware rung does not deliver a hardware
   adapter it advances the ladder and restarts itself once per rung
   (result remembered in webgpu-mode.txt). Consoles coming from older
-  versions resume directly at the GLES rung - nothing already-failed
-  is re-run.
+  versions restart from rung 1 - the old D3D11/D3D12 rungs never ran
+  with a working probe, so nothing already-failed is re-run.
   HONEST DETECTION (1.5.0.0): an adapter is counted as software when
   its name/description says SwiftShader/llvmpipe/Basic Render/WARP,
   not only when the fallback flag is set. v1.4.0.0 relied on that flag
@@ -156,13 +190,15 @@ http://<console-ip>:11443 (Device Portal) -> File explorer -> find the
 Onitor app's LocalState folder -> create/edit browser-flags.txt, then
 restart the app. Useful recipes:
 
-  Hardware WebGPU, OpenGLES rung (the new default - the KEY rung:
-  kOpenGLES is exempt from Chromium's force-SwiftShader fallback):
-    --enable-unsafe-webgpu --use-webgpu-adapter=opengles --use-angle=d3d11 --ignore-gpu-blocklist --enable-unsafe-swiftshader
-  Hardware WebGPU, D3D11 backend (pinnable rung):
-    --enable-unsafe-webgpu --use-webgpu-adapter=d3d11 --use-angle=d3d11 --ignore-gpu-blocklist --enable-unsafe-swiftshader
-  Hardware WebGPU, D3D12 backend (Chromium Windows default):
+  Hardware WebGPU, D3D12 native (the new default rung 1 - no
+  --use-webgpu-adapter switch, Chromium's Windows default backend,
+  blocklist bypassed so no forced SwiftShader fallback):
     --enable-unsafe-webgpu --use-angle=d3d11 --ignore-gpu-blocklist --enable-unsafe-swiftshader
+  Hardware WebGPU, D3D11 backend (rung 2):
+    --enable-unsafe-webgpu --use-webgpu-adapter=d3d11 --use-angle=d3d11 --ignore-gpu-blocklist --enable-unsafe-swiftshader
+  Hardware WebGPU, OpenGLES backend (rung 3, diagnostics - compiled
+  out of win-UWP WebView2 runtimes, expected to fall to SwiftShader):
+    --enable-unsafe-webgpu --use-webgpu-adapter=opengles --use-angle=d3d11 --ignore-gpu-blocklist --enable-unsafe-swiftshader
   Guaranteed software WebGPU (old 1.2.0.0 behaviour):
     --enable-unsafe-webgpu --use-webgpu-adapter=swiftshader --enable-unsafe-swiftshader
   Force WebGPU compatibility profile (lighter feature set, more
@@ -287,3 +323,24 @@ WHAT WAS CHANGED vs original Onitor
     attempt. Green badge -> done. Amber -> one automatic restart onto
     guaranteed SwiftShader, and webgpu-status.txt/chromium.log now
     contain the actual reason.
+- NEW 1.6.0.0 (root cause found + hardware ladder rebuilt):
+  * Full fallback chain verified against the exact engine source running
+    on the console (Chromium 150.0.7871.212, Dawn d089fc91). Root cause
+    of the permanent SwiftShader: every rung's preferred backend found
+    nothing and fell through to the decoder's tail fallback
+    (Vulkan + forceFallbackAdapter = SwiftShader, the only Vulkan
+    adapter on the win-UWP WebView2 runtime).
+  * The OpenGLES rung is dead BY BUILD on Xbox: Dawn's dawn_features.gni
+    compiles the OpenGLES backend out of Windows-UWP WebView2 runtimes.
+    Demoted to a diagnostics-only rung.
+  * New rung order (gen4): D3D12 (native, default backend, blocklist
+    bypassed so the forced fallback never engages) -> D3D11 (the D3D11
+    layer hardware WebGL already uses) -> GLES (diagnostics) -> CPU.
+    The D3D12/D3D11 rungs never ran with a working probe in any older
+    version, so every console - including ones settled on auto-cpu -
+    restarts the ladder from rung 1.
+  * chromium.log upgraded to INFO level (--log-level=0): if a rung still
+    fails, the log now contains the Dawn adapter-enumeration lines that
+    say exactly why.
+  * Mode file unchanged: "auto" restarts the ladder at rung 1, pins
+    ("d3d11"/"d3d12"/"gles") and "auto-cpu" behave as before.

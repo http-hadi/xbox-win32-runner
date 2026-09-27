@@ -276,29 +276,49 @@ namespace onitor.Classes
         //                            prototype name: WebNNAPI) - unknown
         //                            feature names are ignored safely.
         //
-        // HARDWARE LADDER (Xbox only, persisted in webgpu-mode.txt):
-        //   rung 1  "auto-d3d11" : --use-webgpu-adapter=d3d11 - force the
-        //            Dawn D3D11 backend. D3D11 is the one 3D API that IS
-        //            fully available to UWP apps on the console (the same
-        //            API ANGLE uses for WebGL). Verified against Chromium's
-        //            own switch parser: service_utils.cc maps "d3d11" ->
-        //            WebGPUAdapterName::kD3D11.
-        //   rung 2  "auto-d3d12" : Chromium's default Windows backend (Dawn
-        //            D3D12). Historically no adapters were enumerated on
-        //            Xbox, but it is cheap to try before giving up.
-        //   rung 3  "auto-gles"  : --use-webgpu-adapter=opengles - Dawn's
-        //            OpenGLES backend routed through ANGLE's hardware
-        //            D3D11 device (the device WebGL already uses). This is
-        //            the KEY rung: Chromium's webgpu_decoder_impl.cc forces
-        //            the SwiftShader fallback adapter whenever the GPU
-        //            feature list marks ACCELERATED_WEBGPU as software (the
-        //            Xbox GPU is unknown to it) - for every adapter type
-        //            EXCEPT kOpenGLES, which is explicitly exempt from that
-        //            forcing. So GLES is the only route that can hand WebGPU
-        //            a real console GPU on Xbox today.
+        // HARDWARE LADDER (Xbox only, persisted in webgpu-mode.txt, v1.6.0.0
+        // order - every link below is source-verified against the engine
+        // actually running on the console: Edge WebView2 150.0.7871.212,
+        // Chromium tag 150.0.7871.212, Dawn pin d089fc91):
+        //
+        //   rung 1  "auto-d3d12" : NO --use-webgpu-adapter switch (kDefault
+        //            -> Dawn D3D12, the console's NATIVE GPU API, zero
+        //            translation). Two companion flags make it real:
+        //            --ignore-gpu-blocklist skips the ENTIRE GPU blocklist
+        //            (gpu_util.cc ~586) so ACCELERATED_WEBGPU stays Enabled
+        //            instead of software -> webgpu_decoder_impl.cc ~1271 never
+        //            sets force_fallback_adapter_ -> CreatePreferredAdapter
+        //            enumerates the actual console GPU (backend_types={D3D12}
+        //            on Windows) with NO forced fallback; --enable-unsafe-webgpu
+        //            keeps WebGPU on and disables the adapter blocklist
+        //            (use_blocklist() false for SafetyLevel::kUnsafe). BOTH
+        //            flags are parsed in the BROWSER process (service_utils.cc
+        //            ParseGpuPreferences / gpu_util.cc ComputeGpuFeatureInfo)
+        //            and reach the GPU process inside the serialized
+        //            --gpu-preferences blob, so this rung does not depend on
+        //            raw GPU-process switch propagation at all.
+        //   rung 2  "auto-d3d11" : --use-webgpu-adapter=d3d11 - Dawn's D3D11
+        //            backend on the same D3D11 layer ANGLE already uses for
+        //            hardware WebGL (11on12 on the console). Proven device
+        //            creation path, one translation layer.
+        //   rung 3  "auto-gles"  : --use-webgpu-adapter=opengles - kept for
+        //            diagnostics only. Dawn's dawn_features.gni:106 compiles
+        //            the OpenGLES backend OUT of win-UWP builds (the Xbox
+        //            WebView2 runtime), so this rung is source-verified DEAD
+        //            there: EnumerateAdapters(OpenGLES) is empty and the
+        //            decoder's final fallback hands back SwiftShader.
         //   rung 4  "auto-cpu"   : --use-webgpu-adapter=swiftshader - last
         //            resort, guarantees a software adapter so WebGPU pages
         //            (webml.ai etc.) always work, just CPU-driven.
+        //
+        // WHY EVERY OLD RUNG RETURNED SWIFTSHADER: with the feature software-
+        // marked, CreatePreferredAdapter's preferred backend finds nothing
+        // acceptable and falls through to its tail (webgpu_decoder_impl.cc
+        // ~1880): forceFallbackAdapter=true + backendType=Vulkan -> the only
+        // Vulkan adapter on a win-UWP runtime is SwiftShader (dawn_enable_
+        // vulkan's `|| dawn_use_swiftshader` clause). That adapter reports
+        // 'swiftshader google' with isFallback=false - exactly what every
+        // probe since v1.3.0.0 saw.
         //
         // ADAPTIVE STARTUP: browser flags only apply at process start, so
         // the engine probes the live browser after startup (requestAdapter
@@ -334,10 +354,10 @@ namespace onitor.Classes
         // generation this console last ran (bump CurrentLadderGeneration
         // whenever a rung is added/moved). On mismatch: consoles in ANY auto
         // state (settled on SwiftShader OR frozen mid-ladder by the broken
-        // v1.5.0.0 probe) resume directly at the GLES rung - D3D11/D3D12 are
-        // source-verified forced-SwiftShader on Xbox, so nothing worth
-        // retrying is skipped; user pins always survive; fresh consoles
-        // (v1.5.1.0) also START at the GLES rung.
+        // v1.5.0.0 probe) restart at rung 1 (auto-d3d12) - gen4 reordered the
+        // ladder and the old D3D11/D3D12 rungs never ran with a working
+        // probe, so nothing worth retrying is skipped; user pins always
+        // survive; fresh consoles (v1.6.0.0) also START at rung 1.
         //
         // User control via <LocalState>\webgpu-mode.txt (Device Portal):
         //   "auto" (or delete the file) - restart the ladder at rung 1
@@ -359,17 +379,32 @@ namespace onitor.Classes
         private const string BaseGpuFeatureBrowserArguments =
             "--enable-unsafe-webgpu --enable-features=WebGPU,msWebNN,WebNNAPI";
 
-        private const string XboxD3D11BrowserArguments =
-            "--use-webgpu-adapter=d3d11 --use-angle=d3d11 --ignore-gpu-blocklist --enable-unsafe-swiftshader";
-
+        // Rung 1 (v1.6.0.0): kDefault -> Dawn D3D12, the console's native GPU
+        // API. No --use-webgpu-adapter switch at all - that is the point:
+        // ParseWebGPUAdapterName maps "" / absent to kDefault and Windows
+        // kDefault selects backend_types={D3D12} (webgpu_decoder_impl.cc
+        // ~1773). Paired with --ignore-gpu-blocklist + --enable-unsafe-webgpu
+        // (both browser-side, both inside the --gpu-preferences blob) the
+        // unknown-Xbox-GPU software marking never happens, so this is a REAL
+        // hardware adapter enumeration with no forced fallback.
         private const string XboxD3D12BrowserArguments =
             "--use-angle=d3d11 --ignore-gpu-blocklist --enable-unsafe-swiftshader";
 
-        // Rung 3: Dawn's OpenGLES backend through ANGLE's hardware D3D11
-        // device - the only adapter type EXEMPT from Chromium's
-        // force_fallback_adapter software override (webgpu_decoder_impl.cc
-        // line ~1231: the forcing applies to every use_webgpu_adapter value
-        // except kOpenGLES), hence the best hardware hope on Xbox.
+        // Rung 2: Dawn's D3D11 backend. "d3d11" is a valid ParseWebGPUAdapter
+        // name (service_utils.cc kAdapterNames), and dawn_features.gni:83
+        // compiles the D3D11 backend into every Windows build including
+        // win-UWP. Uses the same D3D11 layer ANGLE's hardware WebGL runs on.
+        private const string XboxD3D11BrowserArguments =
+            "--use-webgpu-adapter=d3d11 --use-angle=d3d11 --ignore-gpu-blocklist --enable-unsafe-swiftshader";
+
+        // Rung 3 (diagnostics): Dawn's OpenGLES backend through ANGLE's
+        // hardware D3D11 device. kOpenGLES is the one adapter name exempt
+        // from the force_fallback software override, BUT dawn_features.gni:106
+        // ("Disables OpenGLES when compiling for UWP") compiles the backend
+        // out of the Xbox WebView2 runtime - on such builds EnumerateAdapters
+        // (OpenGLES) is simply empty and the decoder's Vulkan final-fallback
+        // tail returns SwiftShader. Kept only so INFO-level chromium.log can
+        // prove/disprove the win-UWP runtime theory if rungs 1-2 fail.
         private const string XboxGlesBrowserArguments =
             "--use-webgpu-adapter=opengles --use-angle=d3d11 --ignore-gpu-blocklist --enable-unsafe-swiftshader";
 
@@ -382,11 +417,12 @@ namespace onitor.Classes
 
         // Records which ladder generation ran last. Bump the value whenever
         // the rung set or startup behaviour changes - consoles coming from
-        // an older generation (including the probe-frozen gen2 consoles)
-        // resume directly at the GLES rung instead of re-running rungs that
-        // already failed there.
+        // an older generation (including auto-cpu settles from gen3 and the
+        // probe-frozen gen2 consoles) restart the ladder from rung 1
+        // (auto-d3d12), because gen4 reordered and re-purposed the rungs
+        // (the old d3d11/d3d12 rungs never ran with a working probe).
         private const string LadderGenFileName = "webgpu-ladder-gen.txt";
-        private const string CurrentLadderGeneration = "gen3-1.5.1.0";
+        private const string CurrentLadderGeneration = "gen4-1.6.0.0";
 
         /// <summary>
         /// Persisted WebGPU strategy (webgpu-mode.txt). "auto-*" values are
@@ -397,13 +433,13 @@ namespace onitor.Classes
         /// </summary>
         private enum WebGpuMode
         {
-            FreshAuto,    // no / unknown file -> start at the GLES rung (v1.5.1.0)
-            AutoD3D11,    // ladder rung 1 running
-            AutoD3D12,    // ladder rung 2 running
-            AutoGles,     // ladder rung 3 running (GLES via ANGLE)
+            FreshAuto,    // no / unknown file -> start at the D3D12 rung (v1.6.0.0)
+            AutoD3D12,    // ladder rung 1 running (kDefault -> Dawn D3D12, native)
+            AutoD3D11,    // ladder rung 2 running (Dawn D3D11 via 11on12)
+            AutoGles,     // ladder rung 3 running (diagnostics; GLES via ANGLE)
             AutoCpu,      // ladder settled on SwiftShader
-            PinnedD3D11,  // user pinned rung 1 - never auto-advance
-            PinnedD3D12,  // user pinned rung 2 - never auto-advance
+            PinnedD3D12,  // user pinned rung 1 - never auto-advance
+            PinnedD3D11,  // user pinned rung 2 - never auto-advance
             PinnedGles    // user pinned rung 3 - never auto-advance
         }
 
@@ -601,17 +637,15 @@ namespace onitor.Classes
                 WebGpuMode mode = ReadWebGpuMode();
                 if (mode == WebGpuMode.FreshAuto)
                 {
-                    // Fresh ladder (v1.5.1.0): start DIRECTLY at the GLES
-                    // rung and persist it so the startup probe knows which
-                    // backend this process is running. D3D11 and D3D12 are
-                    // skipped: on Xbox Chromium's webgpu_decoder_impl.cc
-                    // force-replaces both with SwiftShader (unknown GPU ->
-                    // software-marked feature list -> force_fallback_adapter
-                    // for everything except kOpenGLES), and with the probe
-                    // now actually working the first restart-worthy backend
-                    // is GLES anyway.
-                    mode = WebGpuMode.AutoGles;
-                    TrySetWebGpuMode("auto-gles");
+                    // Fresh ladder (v1.6.0.0): start at rung 1, kDefault /
+                    // Dawn D3D12 - the console's native GPU API, with the
+                    // browser-side blocklist bypass preventing the unknown-GPU
+                    // software marking (and thus the forced SwiftShader
+                    // fallback) from ever engaging. D3D11/D3D12 never
+                    // actually ran with a working probe on gen2/gen3
+                    // consoles, so they are first-class rungs again.
+                    mode = WebGpuMode.AutoD3D12;
+                    TrySetWebGpuMode("auto-d3d12");
                 }
 
                 if (mode == WebGpuMode.AutoCpu)
@@ -632,12 +666,13 @@ namespace onitor.Classes
                 }
 
                 // Chromium debug log -> <LocalState>\chromium.log (readable
-                // through the Xbox Device Portal file explorer). Captures
-                // Dawn backend / adapter-initialisation errors, the fastest
-                // way to diagnose why a ladder rung failed.
+                // through the Xbox Device Portal file explorer). v1.6.0.0:
+                // --log-level=0 adds INFO severity so Dawn backend / adapter
+                // enumeration lines are captured too - the WARNING-only log
+                // of v1.5.1.0 could not show WHY a rung fell back.
                 try
                 {
-                    args += " --enable-logging --log-file=" + LocalStatePath("chromium.log");
+                    args += " --enable-logging --log-level=0 --log-file=" + LocalStatePath("chromium.log");
                 }
                 catch (Exception) { /* keep the flags without logging */ }
             }
@@ -678,21 +713,22 @@ namespace onitor.Classes
                     mode == WebGpuMode.AutoD3D12 || mode == WebGpuMode.AutoGles)
                 {
                     // Previous generation in ANY auto state - settled on
-                    // SwiftShader, or frozen mid-ladder by the broken v1.5.0.0
-                    // probe ("probe result={}" matched no branch, so the
-                    // ladder never advanced) - resumes directly at the GLES
-                    // rung. D3D11/D3D12 are known forced-SwiftShader on Xbox;
-                    // user pins always survive below.
-                    mode = WebGpuMode.AutoGles;
-                    TrySetWebGpuMode("auto-gles");
+                    // SwiftShader (gen3 auto-cpu), stopped at GLES (gen3), or
+                    // frozen mid-ladder by the broken v1.5.0.0 probe ("probe
+                    // result={}" matched no branch, gen2) - restarts at rung 1
+                    // (auto-d3d12). The gen2/gen3 d3d11/d3d12 rungs never ran
+                    // with a working probe, and v1.6.0.0 pairs them with the
+                    // browser-side blocklist bypass, so they are worth a fresh
+                    // attempt; user pins always survive below.
+                    mode = WebGpuMode.AutoD3D12;
+                    TrySetWebGpuMode("auto-d3d12");
                 }
                 else if (mode != WebGpuMode.PinnedD3D11 &&
                          mode != WebGpuMode.PinnedD3D12 &&
                          mode != WebGpuMode.PinnedGles)
                 {
-                    // Never started: start at the GLES rung (user pins
-                    // survive; FreshAuto is converted in
-                    // ComputeBrowserArguments).
+                    // Never started: start at rung 1 (user pins survive;
+                    // FreshAuto is converted in ComputeBrowserArguments).
                     mode = WebGpuMode.FreshAuto;
                 }
                 TryWriteLadderGeneration();
@@ -1201,7 +1237,7 @@ namespace onitor.Classes
                 catch (Exception) { }
 
                 WebGpuMode mode = ReadWebGpuMode();
-                if (mode == WebGpuMode.FreshAuto) mode = WebGpuMode.AutoGles; // fresh starts at the GLES rung (v1.5.1.0)
+                if (mode == WebGpuMode.FreshAuto) mode = WebGpuMode.AutoD3D12; // fresh starts at rung 1 (v1.6.0.0)
                 bool isXbox = IsXboxDevice();
 
                 Debug.WriteLine("[Onitor] WebGPU probe: " + kind + " ('" + desc + "') mode=" + ModeName(mode));
@@ -1218,12 +1254,13 @@ namespace onitor.Classes
                 if (kind == "fallback" || kind == "null")
                 {
                     // This launch's backend did not produce a hardware
-                    // adapter. Advance the ladder once per rung.
+                    // adapter. Advance the ladder once per rung
+                    // (v1.6.0.0 order: d3d12 -> d3d11 -> gles -> cpu).
                     if (isXbox && !_restartedForFallback)
                     {
                         string next = null;
-                        if (mode == WebGpuMode.AutoD3D11) next = "auto-d3d12";
-                        else if (mode == WebGpuMode.AutoD3D12) next = "auto-gles";
+                        if (mode == WebGpuMode.AutoD3D12) next = "auto-d3d11";
+                        else if (mode == WebGpuMode.AutoD3D11) next = "auto-gles";
                         else if (mode == WebGpuMode.AutoGles) next = "auto-cpu";
 
                         if (next != null && TrySetWebGpuMode(next))
