@@ -417,12 +417,17 @@ namespace onitor.Classes
 
         // Records which ladder generation ran last. Bump the value whenever
         // the rung set or startup behaviour changes - consoles coming from
-        // an older generation (including auto-cpu settles from gen3 and the
-        // probe-frozen gen2 consoles) restart the ladder from rung 1
-        // (auto-d3d12), because gen4 reordered and re-purposed the rungs
-        // (the old d3d11/d3d12 rungs never ran with a working probe).
+        // an older generation (including auto-cpu settles and probe-frozen
+        // gen2/gen3 consoles) restart the ladder from rung 1 (auto-d3d12).
+        // gen5 (1.6.1.0) collapses the ladder to d3d12 -> cpu: the d3d11
+        // rung is PROVEN to always end on SwiftShader on Xbox (the console
+        // D3D11 is the D3D11On12 layer; Dawn's D3D11 backend cannot create
+        // a device on it - reproduced 2026-09-28 in two sessions) and the
+        // gles backend is compiled out of the win-UWP WebView2 runtime, so
+        // both intermediate rungs only ever burned two restarts on the way
+        // to the same SwiftShader result. Pinned values survive as before.
         private const string LadderGenFileName = "webgpu-ladder-gen.txt";
-        private const string CurrentLadderGeneration = "gen4-1.6.0.0";
+        private const string CurrentLadderGeneration = "gen5-1.6.1.0";
 
         /// <summary>
         /// Persisted WebGPU strategy (webgpu-mode.txt). "auto-*" values are
@@ -620,7 +625,33 @@ namespace onitor.Classes
                     if (!string.IsNullOrWhiteSpace(custom))
                     {
                         Debug.WriteLine("[Onitor] Custom browser flags loaded from " + overridePath);
-                        return custom.Trim();
+
+                        // v1.6.1.0 - override sessions are no longer a
+                        // forensic blind spot. In v1.6.0.0 this early return
+                        // skipped BOTH the logging flags the computed path
+                        // appends below AND any status-file trace, so
+                        // browser-flags.txt experiments produced no
+                        // chromium.log and left no webgpu-status.txt line -
+                        // remotely indistinguishable from "never ran".
+                        // Two fixes (Xbox only):
+                        // (a) collapse ALL whitespace to single spaces: a
+                        //     flags line wrapped by an editor used to embed
+                        //     raw CR/LF inside the argument string, silently
+                        //     breaking flag parsing (flag values never
+                        //     contain spaces, so this is safe);
+                        // (b) still append the chromium.log logging flags
+                        //     and record the override in webgpu-status.txt.
+                        string flags = System.Text.RegularExpressions.Regex
+                            .Replace(custom, @"\s+", " ").Trim();
+                        if (IsXboxDevice())
+                        {
+                            string logArgs = LoggingBrowserArguments();
+                            if (logArgs.Length > 0) flags += " " + logArgs;
+                            AppendWebGpuStatus("browser-flags.txt override ACTIVE (" +
+                                flags.Length + " chars) - built-in flags and webgpu-mode bypassed; " +
+                                "chromium.log IS captured this session; probe still runs.");
+                        }
+                        return flags;
                     }
                 }
             }
@@ -666,17 +697,36 @@ namespace onitor.Classes
                 }
 
                 // Chromium debug log -> <LocalState>\chromium.log (readable
-                // through the Xbox Device Portal file explorer). v1.6.0.0:
+                // through the Xbox Device Portal file explorer).
                 // --log-level=0 adds INFO severity so Dawn backend / adapter
                 // enumeration lines are captured too - the WARNING-only log
-                // of v1.5.1.0 could not show WHY a rung fell back.
-                try
+                // of v1.5.1.0 could not show WHY a rung fell back. v1.6.1.0:
+                // extracted into a helper shared with the browser-flags.txt
+                // override path so experiments log the same way.
+                string logFlags = LoggingBrowserArguments();
+                if (logFlags.Length > 0)
                 {
-                    args += " --enable-logging --log-level=0 --log-file=" + LocalStatePath("chromium.log");
+                    args += " " + logFlags;
                 }
-                catch (Exception) { /* keep the flags without logging */ }
             }
             return args;
+        }
+
+        // Chromium logging flags shared by the computed flag path AND the
+        // browser-flags.txt override (v1.6.1.0): debug log to
+        // <LocalState>\chromium.log at INFO severity, readable through the
+        // Xbox Device Portal file explorer. Empty on failure so callers
+        // keep the rest of their flags.
+        private static string LoggingBrowserArguments()
+        {
+            try
+            {
+                return "--enable-logging --log-level=0 --log-file=" + LocalStatePath("chromium.log");
+            }
+            catch (Exception)
+            {
+                return string.Empty; // keep the flags without logging
+            }
         }
 
         private static bool IsXboxDevice()
@@ -1254,14 +1304,29 @@ namespace onitor.Classes
                 if (kind == "fallback" || kind == "null")
                 {
                     // This launch's backend did not produce a hardware
-                    // adapter. Advance the ladder once per rung
-                    // (v1.6.0.0 order: d3d12 -> d3d11 -> gles -> cpu).
+                    // adapter. Advance the ladder once per rung.
+                    // v1.6.1.0 (gen5) order: d3d12 -> cpu. The d3d11 and
+                    // gles rungs were removed from the auto-advance chain:
+                    // on Xbox the console's D3D11 is the D3D11On12 layer
+                    // and Dawn's D3D11 backend cannot create a device on it
+                    // (reproduced 2026-09-28, two sessions, both ended on
+                    // SwiftShader via the decoder's Vulkan fallback tail),
+                    // and the OpenGLES backend is compiled out of the
+                    // win-UWP WebView2 runtime - both rungs only ever
+                    // burned a restart before landing on SwiftShader.
                     if (isXbox && !_restartedForFallback)
                     {
                         string next = null;
-                        if (mode == WebGpuMode.AutoD3D12) next = "auto-d3d11";
-                        else if (mode == WebGpuMode.AutoD3D11) next = "auto-gles";
-                        else if (mode == WebGpuMode.AutoGles) next = "auto-cpu";
+                        if (mode == WebGpuMode.AutoD3D12 ||
+                            mode == WebGpuMode.AutoD3D11 ||
+                            mode == WebGpuMode.AutoGles)
+                        {
+                            // Mid-ladder d3d11/gles states can only come
+                            // from a gen4-written mode file or a manual
+                            // edit - either way the only sane destination
+                            // is the guaranteed rung.
+                            next = "auto-cpu";
+                        }
 
                         if (next != null && TrySetWebGpuMode(next))
                         {
@@ -1281,8 +1346,20 @@ namespace onitor.Classes
                     }
                     else
                     {
+                        // v1.6.1.0: be explicit about the two pins that are
+                        // known to be SwiftShader traps on Xbox - they are
+                        // kept for diagnostics only (gen5 notes above).
+                        string pinHint = string.Empty;
+                        if (mode == WebGpuMode.PinnedD3D11)
+                        {
+                            pinHint = " (known trap on Xbox: console D3D11 is the D3D11On12 layer - Dawn D3D11 cannot create a device on it; diagnostics only)";
+                        }
+                        else if (mode == WebGpuMode.PinnedGles)
+                        {
+                            pinHint = " (known trap on Xbox: the OpenGLES backend is compiled out of the win-UWP WebView2 runtime; diagnostics only)";
+                        }
                         AppendWebGpuStatus("WebGPU is on a software adapter or unavailable (mode=" + ModeName(mode) +
-                            "). Set webgpu-mode.txt to 'auto' to retry the hardware ladder.");
+                            "). Set webgpu-mode.txt to 'auto' to retry the hardware ladder." + pinHint);
                     }
                     return;
                 }

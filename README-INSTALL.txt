@@ -40,6 +40,45 @@ Notes for Xbox:
   Engine Mode = Legacy to use the TV-optimized YouTube interface.
 
 
+WebGPU / WEBNN - CURRENT STATE (1.6.1.0)
+----------------------------------------
+HARDWARE WEBGPU IS WORKING on Xbox dev-mode consoles: green badge,
+adapter 'microsoft', Dawn's native D3D12 backend on the real console
+GPU, hardware WebGL. This is the result of the 1.6.0.0 rebuild (full
+story below). If your badge is green: nothing to do, enjoy the GPU.
+
+ONE KNOWN LIMITATION - COMPUTE PIPELINES (honest status):
+Rendering pipelines, textures, buffers and canvas rendering all run on
+the real GPU. WebGPU COMPUTE dispatches, however, crash the console's
+UWP D3D12 driver with DXGI_ERROR_DRIVER_INTERNAL_ERROR (device removed;
+Chromium then restarts its GPU process and rendering continues). This
+is deterministic across sessions (verified 2026-09-28: on
+webgpucheck.com every render test passes and the GPU is listed
+natively; the compute-pipeline test reports the mapAsync exception).
+The crash is inside the precompiled WebView2 runtime + console driver,
+i.e. below anything app flags control. Tested and ruled out so far:
+  * --disable-dawn-features=use_dxc (force the old FXC compiler):
+    kills the WHOLE GPU stack on the console - WebGPU and WebGL both
+    become unavailable (the FXC/d3dcompiler path cannot initialize
+    inside the UWP container). Dead end, do not use.
+  * --enable-dawn-features=d3d12_dont_use_shader_model_66_or_higher:
+    compute still crashes - the shader model is not the trigger.
+Remaining untested candidates (root-signature 1.0, workgroup-access
+decomposition, HLSL 2018 codegen) can be tried with one paste - see
+the "Compute-crash experiment" recipe in the flags section below.
+
+XBOX DEV MODE - automatic hardware ladder (1.6.1.0 order, gen5):
+  1) Dawn D3D12 backend (Chromium's Windows default, no
+     --use-webgpu-adapter switch, blocklist bypassed) - the console's
+     native GPU API. Works: green badge.
+  2) SwiftShader software adapter - guaranteed last resort.
+The 1.6.0.0 d3d11 and gles rungs were PROVEN to always end on
+SwiftShader on Xbox (the console's D3D11 is the D3D11On12 layer -
+Dawn's D3D11 backend cannot create a device on it; the OpenGLES
+backend is compiled out of the win-UWP WebView2 runtime) and were
+removed from the auto-ladder. Their pin values still work for
+diagnostics and now say so in webgpu-status.txt.
+
 WebGPU / WEBNN (AI MODELS IN THE BROWSER) - rebuilt in 1.6.0.0
 ----------------------------------------------------------
 WebGPU (and the WebNN feature names) are enabled by default in the
@@ -132,21 +171,17 @@ What to expect per device:
 - WINDOWS 10/11 DESKTOP: full hardware-accelerated WebGPU through the
   Evergreen WebView2 runtime (your PC's GPU, D3D12). Flags used:
   --enable-unsafe-webgpu --enable-features=WebGPU,msWebNN,WebNNAPI
-- XBOX DEV MODE - automatic hardware ladder (1.6.0.0 order): the app
+- XBOX DEV MODE - automatic hardware ladder (1.6.1.0 order): the app
   tries REAL-GPU backends until one works:
     1) Dawn D3D12 backend (no --use-webgpu-adapter switch = Chromium's
        Windows default) - the console's NATIVE GPU API, zero translation
        layers, run with the blocklist bypass so no forced fallback can
        engage. First time this configuration has ever run on the console
        (previous versions skipped it / their probe was broken).
-    2) Dawn D3D11 backend (--use-webgpu-adapter=d3d11) - the same D3D11
-       layer ANGLE uses for your hardware WebGL (11on12 on the console).
-    3) Dawn OpenGLES backend (--use-webgpu-adapter=opengles) - kept for
-       diagnostics only: Dawn's build config compiles the OpenGLES
-       backend out of Windows-UWP WebView2 runtimes, so on the console
-       this rung is expected to fall through to SwiftShader.
-    4) SwiftShader software adapter (--use-webgpu-adapter=swiftshader)
+    2) SwiftShader software adapter (--use-webgpu-adapter=swiftshader)
        - guaranteed last resort: models load and run on the CPU.
+  (1.6.0.0 briefly had d3d11 and gles as rungs 2-3; both were proven to
+  always end on SwiftShader on Xbox - see the 1.6.1.0 notes above.)
   At startup the app asks the browser for an adapter (the fixed
   kick+poll probe); while a hardware rung does not deliver a hardware
   adapter it advances the ladder and restarts itself once per rung
@@ -184,28 +219,36 @@ the file to "d3d11", "d3d12" or "gles"; to stay on SwiftShader use
 CHANGING FLAGS WITHOUT A REBUILD (power users)
 ----------------------------------------------
 If the file  browser-flags.txt  exists in the app's local state folder,
-its entire content is used verbatim as the WebView2 browser arguments
+its entire content is used as the WebView2 browser arguments
 (replacing the built-in defaults). On Xbox, browse to
 http://<console-ip>:11443 (Device Portal) -> File explorer -> find the
 Onitor app's LocalState folder -> create/edit browser-flags.txt, then
-restart the app. Useful recipes:
+restart the app.
 
-  Hardware WebGPU, D3D12 native (the new default rung 1 - no
+1.6.1.0 improvements to override sessions:
+- chromium.log IS captured (the logging flags are appended to your
+  line automatically) - in 1.6.0.0 override sessions logged nothing.
+- webgpu-status.txt records a "browser-flags.txt override ACTIVE"
+  line each launch, so experiments are always traceable.
+- Pasted/wrapped lines are whitespace-normalized automatically (raw
+  line breaks used to silently break flag parsing).
+Useful recipes:
+
+  Hardware WebGPU, D3D12 native (the default rung 1 - no
   --use-webgpu-adapter switch, Chromium's Windows default backend,
   blocklist bypassed so no forced SwiftShader fallback):
     --enable-unsafe-webgpu --use-angle=d3d11 --ignore-gpu-blocklist --enable-unsafe-swiftshader
-  Hardware WebGPU, D3D11 backend (rung 2):
+  Compute-crash experiment (ALL remaining Dawn compute-path toggles
+  at once: shader model capped below 6.6, workgroup-access
+  decomposition ON, root signature forced to 1.0, HLSL 2018 codegen).
+  If the webgpucheck.com compute test PASSES with this line, tell us -
+  the winning toggle gets baked into the next build:
+    --enable-unsafe-webgpu --enable-features=WebGPU,msWebNN,WebNNAPI --use-angle=d3d11 --ignore-gpu-blocklist --enable-unsafe-swiftshader --enable-dawn-features=d3d12_dont_use_shader_model_66_or_higher,d3d12_decompose_workgroup_access --disable-dawn-features=d3d12_use_root_signature_version_1_1,d3d12_use_hlsl_2021
+  Hardware WebGPU, D3D11 backend (known SwiftShader trap on Xbox -
+  diagnostics only, console D3D11 is the 11on12 layer):
     --enable-unsafe-webgpu --use-webgpu-adapter=d3d11 --use-angle=d3d11 --ignore-gpu-blocklist --enable-unsafe-swiftshader
-  Hardware WebGPU, OpenGLES backend (rung 3, diagnostics - compiled
-  out of win-UWP WebView2 runtimes, expected to fall to SwiftShader):
-    --enable-unsafe-webgpu --use-webgpu-adapter=opengles --use-angle=d3d11 --ignore-gpu-blocklist --enable-unsafe-swiftshader
   Guaranteed software WebGPU (old 1.2.0.0 behaviour):
     --enable-unsafe-webgpu --use-webgpu-adapter=swiftshader --enable-unsafe-swiftshader
-  Force WebGPU compatibility profile (lighter feature set, more
-  adapters pass validation):
-    --enable-unsafe-webgpu --use-webgpu-adapter=opengles --force-webgpu-compat --use-angle=d3d11 --ignore-gpu-blocklist
-  WebGPU + WebNN feature names:
-    --enable-unsafe-webgpu --enable-features=WebGPU,msWebNN,WebNNAPI --use-webgpu-adapter=opengles --ignore-gpu-blocklist
 Delete the file (or empty it) to return to the built-in defaults.
 
 
@@ -344,3 +387,23 @@ WHAT WAS CHANGED vs original Onitor
     say exactly why.
   * Mode file unchanged: "auto" restarts the ladder at rung 1, pins
     ("d3d11"/"d3d12"/"gles") and "auto-cpu" behave as before.
+- NEW 1.6.1.0 (instrumentation + honest compute status):
+  * COMPUTE PIPELINE LIMITATION documented (see the 1.6.1.0 section at
+    the top): render WebGPU is hardware; compute dispatches crash the
+    console's UWP D3D12 driver (DXGI_ERROR_DRIVER_INTERNAL_ERROR). The
+    two Dawn compiler levers were tested via browser-flags.txt and
+    ruled out: use_dxc off kills the whole GPU stack (FXC cannot
+    initialize in the UWP container), the shader-model-6.6 cap does
+    not stop the crash.
+  * browser-flags.txt override sessions now capture chromium.log and
+    write a "browser-flags.txt override ACTIVE" line to
+    webgpu-status.txt (in 1.6.0.0 they were a forensic blind spot:
+    no log, no status trace), and pasted flags are whitespace-
+    normalized so wrapped lines cannot silently break parsing.
+  * Ladder collapsed to gen5 (d3d12 -> cpu): the d3d11 rung always
+    ended on SwiftShader on Xbox (console D3D11 = D3D11On12 layer,
+    Dawn D3D11 cannot create a device on it - reproduced twice) and
+    the gles backend is compiled out of the runtime; both rungs only
+    ever burned two restarts on the way to the same result. Pinning
+    "d3d11"/"gles" still works for diagnostics and webgpu-status.txt
+    now explains the trap when a pinned rung falls back.
