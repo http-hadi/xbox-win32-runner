@@ -261,6 +261,7 @@
     <Content Include="PagesHTML\Assets\icon2.png">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </Content>
+    <Content Include="PagesHTML\gpu-diag.html" />
     <Content Include="PagesHTML\Home.html" />
     <Content Include="PagesHTML\NoInternet.html" />
     <Content Include="PagesHTML\NotFound.html" />

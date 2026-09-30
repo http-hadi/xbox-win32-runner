@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Onitor WebGPU compute diagnostic</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+  html, body { margin: 0; background: #12141a; color: #e8eaf0; font: 20px/1.4 system-ui, sans-serif; }
+  body { padding: 28px 48px 60px 48px; }
+  h1 { font-size: 30px; margin: 0 0 4px 0; }
+  h2 { font-size: 22px; margin: 28px 0 8px 0; color: #9aa3af; font-weight: 600; }
+  .sub { color: #9aa3af; font-size: 17px; margin-bottom: 14px; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { text-align: left; padding: 7px 12px; border-bottom: 1px solid #2a2e38; vertical-align: top; }
+  th { color: #9aa3af; font-weight: 600; font-size: 16px; }
+  td.detail { font: 15px/1.35 Consolas, monospace; color: #c9ced8; word-break: break-word; white-space: pre-wrap; }
+  .PASS { color: #34d27b; font-weight: 700; }
+  .FAIL { color: #ff6b6b; font-weight: 700; }
+  .SKIP { color: #f5b93d; font-weight: 700; }
+  .RUNNING { color: #6ab0ff; font-weight: 700; }
+  .PENDING { color: #6b7280; }
+  pre { background: #1a1d25; border: 1px solid #2a2e38; border-radius: 8px; padding: 12px 16px;
+        font: 15px/1.4 Consolas, monospace; white-space: pre-wrap; word-break: break-word; }
+  #verdict { font-size: 21px; }
+  #verdict div { margin: 6px 0; }
+  button { font: 600 20px system-ui, sans-serif; padding: 12px 26px; margin-right: 14px; border-radius: 10px;
+           border: 2px solid #4b5563; background: #1f2430; color: #e8eaf0; cursor: pointer; }
+  button:focus, button:hover { border-color: #34d27b; outline: none; }
+</style>
+</head>
+<body>
+<h1>WebGPU compute diagnostic</h1>
+<div class="sub">Each test below runs on its own fresh GPU device so one failure cannot hide the next.
+The exact error text is printed - a screenshot of this page is all that is needed.</div>
+<div>
+  <button id="run">Run again</button>
+  <button id="copy">Copy report</button>
+</div>
+
+<h2>Verdict</h2>
+<div id="verdict">Running...</div>
+
+<h2>Tests</h2>
+<table>
+  <thead><tr><th>#</th><th>Test</th><th>Result</th><th>ms</th><th>Detail (exact errors)</th></tr></thead>
+  <tbody id="rows"></tbody>
+</table>
+
+<h2>Environment</h2>
+<pre id="env">collecting...</pre>
+
+<script>
+'use strict';
+
+/* ---------------------------------------------------------------- helpers */
+var $ = function (id) { return document.getElementById(id); };
+function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+function withTimeout(p, ms, label) {
+  var t;
+  var timeout = new Promise(function (_, rej) {
+    t = setTimeout(function () { rej(new Error('TIMEOUT after ' + ms + 'ms waiting for ' + label)); }, ms);
+  });
+  return Promise.race([p, timeout]).then(
+    function (v) { clearTimeout(t); return v; },
+    function (e) { clearTimeout(t); throw e; });
+}
+function errStr(e) {
+  if (!e) return 'unknown error';
+  return (e.name || 'Error') + ': ' + (e.message || String(e));
+}
+
+/* ---------------------------------------------------- device + instrument */
+async function getDevice(row) {
+  for (var i = 0; i < 6; i++) {
+    try {
+      var adapter = await withTimeout(navigator.gpu.requestAdapter(), 8000, 'requestAdapter');
+      if (adapter) {
+        var device = await withTimeout(adapter.requestDevice(), 8000, 'requestDevice');
+        return { adapter: adapter, device: device };
+      }
+      row.note = 'requestAdapter returned null (attempt ' + (i + 1) + ')';
+    } catch (e) {
+      row.note = errStr(e) + ' (attempt ' + (i + 1) + ')';
+    }
+    await sleep(1500); /* give a restarted GPU process time to come back */
+  }
+  return null;
+}
+
+function instrument(device, ctx) {
+  ctx.lost = null;
+  ctx.uncaptured = [];
+  ctx.destroying = false;
+  device.lost.then(function (info) {
+    if (!ctx.destroying) { ctx.lost = { reason: info.reason, message: info.message }; }
+  });
+  device.addEventListener('uncapturederror', function (ev) {
+    var e = ev.error;
+    ctx.uncaptured.push(((e && e.constructor && e.constructor.name) || 'GPUError') + ': ' + (e && e.message));
+  });
+}
+
+async function runStage(id, title, fn) {
+  var row = { id: id, title: title, status: 'RUNNING', detail: '', ms: 0 };
+  results.push(row);
+  renderRows();
+  var t0 = performance.now();
+
+  var got = await getDevice(row);
+  if (!got) {
+    row.status = 'SKIP';
+    row.detail = 'GPU did not (re)appear: ' + (row.note || 'no adapter');
+    row.ms = Math.round(performance.now() - t0);
+    renderRows();
+    return row;
+  }
+  var device = got.device;
+  var ctx = {};
+  instrument(device, ctx);
+  device.pushErrorScope('validation');
+  device.pushErrorScope('out-of-memory');
+  device.pushErrorScope('internal');
+
+  var err = null;
+  try { await fn(device, ctx); } catch (e) { err = e; }
+
+  var scopeErrs = [];
+  var order = ['internal', 'out-of-memory', 'validation'];
+  for (var i = 0; i < order.length; i++) {
+    try {
+      var e2 = await withTimeout(device.popErrorScope(), 3000, 'popErrorScope(' + order[i] + ')');
+      if (e2) scopeErrs.push(order[i] + ' error: ' + e2.message);
+    } catch (e3) {
+      scopeErrs.push('error scopes unreadable (' + errStr(e3) + ')');
+      break;
+    }
+  }
+  await sleep(500); /* let device.lost settle before judging */
+
+  var parts = [];
+  if (err) parts.push('EXCEPTION  ' + errStr(err));
+  if (ctx.lost) parts.push('DEVICE LOST  reason=' + ctx.lost.reason + '  message=' + ctx.lost.message);
+  for (var s = 0; s < scopeErrs.length; s++) parts.push(scopeErrs[s]);
+  for (var u = 0; u < ctx.uncaptured.length; u++) parts.push('uncaptured  ' + ctx.uncaptured[u]);
+
+  row.status = parts.length === 0 ? 'PASS' : 'FAIL';
+  row.detail = parts.join('\n');
+  row.deviceLost = !!ctx.lost;
+  row.ms = Math.round(performance.now() - t0);
+
+  ctx.destroying = true;
+  try { device.destroy(); } catch (e4) { /* already lost */ }
+  renderRows();
+  return row;
+}
+
+/* ------------------------------------------------------------- test bodies */
+function expectEq(actual, expectFn, what) {
+  for (var i = 0; i < actual.length; i++) {
+    var want = expectFn(i);
+    if (actual[i] !== want) {
+      throw new Error(what + ' data mismatch at [' + i + ']: got ' + actual[i] + ', expected ' + want);
+    }
+  }
+}
+
+async function readBack(device, encoderFill, size) {
+  var dst = device.createBuffer({ size: size, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+  var enc = device.createCommandEncoder();
+  encoderFill(enc, dst);
+  device.queue.submit([enc.finish()]);
+  await withTimeout(dst.mapAsync(GPUMapMode.READ), 8000, 'mapAsync(READ)');
+  var copy = dst.getMappedRange().slice(0);
+  dst.unmap();
+  return copy;
+}
+
+async function tCopyRoundtrip(device) {
+  var N = 256;
+  var src = device.createBuffer({ size: N, usage: GPUBufferUsage.COPY_SRC, mappedAtCreation: true });
+  var w = new Uint32Array(src.getMappedRange());
+  for (var i = 0; i < w.length; i++) w[i] = i * 3 + 1;
+  src.unmap();
+  var buf = await readBack(device, function (enc, dst) { enc.copyBufferToBuffer(src, 0, dst, 0, N); }, N);
+  expectEq(new Uint32Array(buf), function (i) { return i * 3 + 1; }, 'copy');
+}
+
+async function tWriteBuffer(device) {
+  var N = 256;
+  var mid = device.createBuffer({ size: N, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC });
+  var data = new Uint32Array(N / 4);
+  for (var i = 0; i < data.length; i++) data[i] = i + 7;
+  device.queue.writeBuffer(mid, 0, data);
+  var buf = await readBack(device, function (enc, dst) { enc.copyBufferToBuffer(mid, 0, dst, 0, N); }, N);
+  expectEq(new Uint32Array(buf), function (i) { return i + 7; }, 'writeBuffer');
+}
+
+async function tRender(device) {
+  var tex = device.createTexture({
+    size: [4, 4], format: 'rgba8unorm',
+    usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC
+  });
+  var mod = device.createShaderModule({ code:
+    '@vertex fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4f {\n' +
+    '  var p = array<vec2f, 3>(vec2f(-1.0, -1.0), vec2f(3.0, -1.0), vec2f(-1.0, 3.0));\n' +
+    '  return vec4f(p[i], 0.0, 1.0);\n' +
+    '}\n' +
+    '@fragment fn fs() -> @location(0) vec4f { return vec4f(0.0, 1.0, 0.0, 1.0); }\n' });
+  var pipe = device.createRenderPipeline({
+    layout: 'auto',
+    vertex: { module: mod, entryPoint: 'vs' },
+    fragment: { module: mod, entryPoint: 'fs', targets: [{ format: 'rgba8unorm' }] },
+    primitive: { topology: 'triangle-list' }
+  });
+  var buf = await readBack(device, function (enc, dst) {
+    var pass = enc.beginRenderPass({ colorAttachments: [{
+      view: tex.createView(), clearValue: { r: 0, g: 0, b: 0, a: 1 }, loadOp: 'clear', storeOp: 'store' }] });
+    pass.setPipeline(pipe);
+    pass.draw(3);
+    pass.end();
+    enc.copyTextureToBuffer({ texture: tex }, { buffer: dst, bytesPerRow: 256 }, [4, 4, 1]);
+  }, 1024);
+  var px = new Uint8Array(buf, 0, 4);
+  if (px[0] !== 0 || px[1] !== 255 || px[2] !== 0 || px[3] !== 255) {
+    throw new Error('render pixel mismatch: got [' + Array.prototype.join.call(px, ',') + '], expected [0,255,0,255]');
+  }
+}
+
+async function tComputeNoop(device) {
+  var mod = device.createShaderModule({ code: '@compute @workgroup_size(1) fn main() {}' });
+  var pipe = device.createComputePipeline({ layout: 'auto', compute: { module: mod, entryPoint: 'main' } });
+  var enc = device.createCommandEncoder();
+  var pass = enc.beginComputePass();
+  pass.setPipeline(pipe);
+  pass.dispatchWorkgroups(1);
+  pass.end();
+  device.queue.submit([enc.finish()]);
+  await withTimeout(device.queue.onSubmittedWorkDone(), 8000, 'onSubmittedWorkDone');
+}
+
+async function computeRoundtrip(device, code, expectFn, useAsync) {
+  var mod = device.createShaderModule({ code: code });
+  var desc = { layout: 'auto', compute: { module: mod, entryPoint: 'main' } };
+  var pipe = useAsync
+    ? await withTimeout(device.createComputePipelineAsync(desc), 8000, 'createComputePipelineAsync')
+    : device.createComputePipeline(desc);
+  var storage = device.createBuffer({ size: 256, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC });
+  var bg = device.createBindGroup({
+    layout: pipe.getBindGroupLayout(0),
+    entries: [{ binding: 0, resource: { buffer: storage } }]
+  });
+  var buf = await readBack(device, function (enc, dst) {
+    var pass = enc.beginComputePass();
+    pass.setPipeline(pipe);
+    pass.setBindGroup(0, bg);
+    pass.dispatchWorkgroups(1);
+    pass.end();
+    enc.copyBufferToBuffer(storage, 0, dst, 0, 256);
+  }, 256);
+  expectEq(new Uint32Array(buf), expectFn, 'compute output');
+}
+
+var WGSL_FIXED =
+  '@group(0) @binding(0) var<storage, read_write> out: array<u32, 64>;\n' +
+  '@compute @workgroup_size(64) fn main(@builtin(global_invocation_id) id: vec3u) {\n' +
+  '  out[id.x] = id.x * 2u + 1u;\n}\n';
+var WGSL_ARRAYLEN =
+  '@group(0) @binding(0) var<storage, read_write> out: array<u32>;\n' +
+  '@compute @workgroup_size(64) fn main(@builtin(global_invocation_id) id: vec3u) {\n' +
+  '  if (id.x < arrayLength(&out)) { out[id.x] = id.x * 2u + 1u; }\n}\n';
+var WGSL_WORKGROUP =
+  'var<workgroup> tmp: array<u32, 64>;\n' +
+  '@group(0) @binding(0) var<storage, read_write> out: array<u32, 64>;\n' +
+  '@compute @workgroup_size(64) fn main(@builtin(local_invocation_index) li: u32) {\n' +
+  '  tmp[li] = li;\n  workgroupBarrier();\n  out[li] = tmp[63u - li];\n}\n';
+
+var odd = function (i) { return i * 2 + 1; };
+
+var STAGES = [
+  ['T1', 'Buffer copy -> mapAsync (no shader)',            tCopyRoundtrip],
+  ['T2', 'queue.writeBuffer -> copy -> mapAsync',          tWriteBuffer],
+  ['T3', 'Render pipeline draw -> readback (mapAsync)',    tRender],
+  ['T4', 'Compute dispatch, NO resources',                 tComputeNoop],
+  ['T5', 'Compute writes storage buffer (fixed array)',    function (d) { return computeRoundtrip(d, WGSL_FIXED, odd, false); }],
+  ['T6', 'Compute + arrayLength() on storage buffer',      function (d) { return computeRoundtrip(d, WGSL_ARRAYLEN, odd, false); }],
+  ['T7', 'Compute + workgroup memory + barrier',           function (d) { return computeRoundtrip(d, WGSL_WORKGROUP, function (i) { return 63 - i; }, false); }],
+  ['T8', 'Compute via createComputePipelineAsync',         function (d) { return computeRoundtrip(d, WGSL_FIXED, odd, true); }],
+  ['T9', 'Recovery check: buffer copy -> mapAsync again',  tCopyRoundtrip]
+];
+
+/* ------------------------------------------------------------------ verdict */
+function verdict(r) {
+  var by = {};
+  r.forEach(function (x) { by[x.id] = x.status; });
+  var out = [];
+  var ok = function (id) { return by[id] === 'PASS'; };
+  var bad = function (id) { return by[id] === 'FAIL'; };
+  if (!navigator.gpu) return ['navigator.gpu is missing - WebGPU is not enabled in this browser session.'];
+
+  if (bad('T1') || bad('T2')) {
+    out.push('Plain buffer copy + mapAsync fails with NO shader involved. The problem is buffer readback / device health itself, not compute.');
+  }
+  if (ok('T1') && ok('T2') && bad('T3')) {
+    out.push('Buffers and mapAsync work, but the RENDER test fails - unexpected; see its detail.');
+  }
+  if (ok('T1') && ok('T3') && bad('T4')) {
+    out.push('Even an EMPTY compute dispatch (no buffers) fails: the dispatch / compute pipeline itself is the trigger.');
+  } else if (ok('T4') && bad('T5')) {
+    out.push('Empty dispatch works but writing a STORAGE BUFFER from compute fails: the storage-buffer (UAV) path is the trigger.');
+  } else if (ok('T5') && bad('T6')) {
+    out.push('Storage writes work but arrayLength() fails: the buffer-size-query / robustness path is the trigger.');
+  } else if (ok('T5') && ok('T6') && bad('T7')) {
+    out.push('Storage writes work but workgroup memory + barrier fails: workgroup init / shared memory is the trigger.');
+  } else if (ok('T5') && bad('T8')) {
+    out.push('Synchronous compute pipelines work but createComputePipelineAsync fails: the async pipeline path is the trigger.');
+  }
+  var allCompute = ['T4', 'T5', 'T6', 'T7', 'T8'];
+  if (allCompute.every(ok) && ok('T1') && ok('T3')) {
+    out.push('ALL compute tests PASS on this console. Compute works - the earlier failure is specific to the shader/test that page runs (not to compute on this GPU in general).');
+  }
+  var firstFail = r.filter(function (x) { return x.status === 'FAIL'; })[0];
+  if (firstFail) {
+    if (r.some(function (x) { return x.status === 'FAIL' && x.deviceLost; })) {
+      out.push('At least one test lost the GPU device (see DEVICE LOST lines). The reason/message text there is the ground truth for what happened.');
+    }
+    if (ok('T9') && r.some(function (x) { return x.id !== 'T9' && x.status === 'FAIL'; })) {
+      out.push('The recovery check passed, so the GPU came back after the failure (a crash + GPU-process restart, not a permanent break).');
+    } else if (bad('T9') || by['T9'] === 'SKIP') {
+      out.push('The recovery check did NOT pass - the GPU did not come back cleanly after the failure.');
+    }
+  }
+  if (out.length === 0) out.push('Inconclusive - read the per-test details.');
+  return out;
+}
+
+/* ------------------------------------------------------------------- render */
+var results = [];
+var envText = '';
+
+function renderRows() {
+  var body = $('rows');
+  while (body.firstChild) body.removeChild(body.firstChild);
+  STAGES.forEach(function (st) {
+    var row = results.filter(function (x) { return x.id === st[0]; })[0];
+    var tr = document.createElement('tr');
+    function cell(text, cls) {
+      var td = document.createElement('td');
+      td.textContent = text;
+      if (cls) td.className = cls;
+      tr.appendChild(td);
+      return td;
+    }
+    cell(st[0]);
+    cell(st[1]);
+    cell(row ? row.status : 'pending', row ? row.status : 'PENDING');
+    cell(row && row.ms ? String(row.ms) : '');
+    cell(row ? row.detail : '', 'detail');
+    body.appendChild(tr);
+  });
+}
+
+function renderVerdict(lines) {
+  var v = $('verdict');
+  while (v.firstChild) v.removeChild(v.firstChild);
+  lines.forEach(function (l) {
+    var d = document.createElement('div');
+    d.textContent = l;
+    v.appendChild(d);
+  });
+}
+
+function reportText(vlines) {
+  var t = 'Onitor WebGPU compute diagnostic\n\nVERDICT\n' + vlines.join('\n') + '\n\nTESTS\n';
+  results.forEach(function (r) {
+    t += r.id + ' ' + r.title + ' -> ' + r.status + ' (' + r.ms + ' ms)\n';
+    if (r.detail) t += '    ' + r.detail.replace(/\n/g, '\n    ') + '\n';
+  });
+  return t + '\nENVIRONMENT\n' + envText;
+}
+
+/* -------------------------------------------------------------- environment */
+async function collectEnv() {
+  var lines = [];
+  lines.push('userAgent: ' + navigator.userAgent);
+  lines.push('hardwareConcurrency: ' + navigator.hardwareConcurrency + '   deviceMemory: ' + navigator.deviceMemory);
+  if (!navigator.gpu) { lines.push('navigator.gpu: MISSING'); return lines.join('\n'); }
+  try {
+    var adapter = await withTimeout(navigator.gpu.requestAdapter(), 8000, 'requestAdapter');
+    if (!adapter) { lines.push('requestAdapter: null'); }
+    else {
+      var info = adapter.info || {};
+      ['vendor', 'architecture', 'device', 'description', 'subgroupMinSize', 'subgroupMaxSize'].forEach(function (k) {
+        try { lines.push('adapter.' + k + ': ' + info[k]); } catch (e) { /* ignore */ }
+      });
+      lines.push('adapter.isFallbackAdapter: ' + (adapter.isFallbackAdapter));
+      lines.push('features: ' + Array.from(adapter.features).sort().join(', '));
+      var lim = adapter.limits, keys = ['maxStorageBuffersPerShaderStage', 'maxStorageBufferBindingSize',
+        'maxComputeWorkgroupSizeX', 'maxComputeInvocationsPerWorkgroup', 'maxComputeWorkgroupStorageSize',
+        'maxBufferSize', 'maxBindGroups'];
+      keys.forEach(function (k) { lines.push('limits.' + k + ': ' + lim[k]); });
+    }
+  } catch (e) { lines.push('adapter query failed: ' + errStr(e)); }
+  try {
+    var gl = document.createElement('canvas').getContext('webgl2');
+    var ext = gl && gl.getExtension('WEBGL_debug_renderer_info');
+    lines.push('WebGL renderer: ' + (ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : '(unavailable/masked)'));
+  } catch (e) { /* ignore */ }
+  return lines.join('\n');
+}
+
+/* --------------------------------------------------------------------- main */
+var running = false;
+async function runAll() {
+  if (running) return;
+  running = true;
+  results = [];
+  renderRows();
+  renderVerdict(['Running... (a failing test can take ~15 s while the GPU process restarts)']);
+  $('env').textContent = 'collecting...';
+  try {
+    envText = await collectEnv();
+    $('env').textContent = envText;
+    if (!navigator.gpu) {
+      renderVerdict(verdict([]));
+      return;
+    }
+    for (var i = 0; i < STAGES.length; i++) {
+      await runStage(STAGES[i][0], STAGES[i][1], STAGES[i][2]);
+      await sleep(400);
+    }
+    renderVerdict(verdict(results));
+  } catch (e) {
+    renderVerdict(['Diagnostic page error: ' + errStr(e)]);
+  } finally {
+    running = false;
+  }
+}
+
+$('run').addEventListener('click', runAll);
+$('copy').addEventListener('click', function () {
+  var text = reportText(Array.prototype.map.call($('verdict').children, function (d) { return d.textContent; }));
+  try {
+    navigator.clipboard.writeText(text).then(function () { $('copy').textContent = 'Copied'; },
+                                             function () { $('copy').textContent = 'Copy failed'; });
+  } catch (e) { $('copy').textContent = 'Copy unavailable'; }
+});
+window.__gpuDiag = { runAll: runAll, results: function () { return results; }, verdict: verdict, STAGES: STAGES };
+window.addEventListener('load', function () { setTimeout(runAll, 300); });
+</script>
+</body>
+</html>
