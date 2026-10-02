@@ -21,6 +21,8 @@
   .PENDING { color: #6b7280; }
   pre { background: #1a1d25; border: 1px solid #2a2e38; border-radius: 8px; padding: 12px 16px;
         font: 15px/1.4 Consolas, monospace; white-space: pre-wrap; word-break: break-word; }
+  #notice { display: none; background: #3a2a05; border: 2px solid #f5b93d; color: #ffe2a0;
+            border-radius: 10px; padding: 14px 20px; margin: 14px 0; font-size: 22px; }
   #verdict { font-size: 21px; }
   #verdict div { margin: 6px 0; }
   button { font: 600 20px system-ui, sans-serif; padding: 12px 26px; margin-right: 14px; border-radius: 10px;
@@ -29,18 +31,19 @@
 </style>
 </head>
 <body>
-<h1>WebGPU compute diagnostic</h1>
-<div class="sub">Each test below runs on its own fresh GPU device so one failure cannot hide the next.
-The exact error text is printed - a screenshot of this page is all that is needed.</div>
+<h1>WebGPU compute diagnostic <span style="font-size:16px;color:#9aa3af">v3 - resumable</span></h1>
+<div class="sub">One shared GPU device, a health check after every step. If a step kills the GPU the page stops,
+tells you to fully quit and reopen the app, and then continues with the next test by itself.
+Results accumulate across restarts. A screenshot of this page is all that is needed.</div>
 <div>
-  <button id="run">Run again</button>
+  <button id="run">Run / resume</button>
+  <button id="start">Start over</button>
   <button id="copy">Copy report</button>
-  <button id="clearcrash">Clear crash memory</button>
 </div>
-<pre id="prev" style="display:none"></pre>
+<div id="notice"></div>
 
 <h2>Verdict</h2>
-<div id="verdict">Running...</div>
+<div id="verdict">Starting...</div>
 
 <h2>Tests</h2>
 <table>
@@ -71,133 +74,244 @@ function errStr(e) {
   return (e.name || 'Error') + ': ' + (e.message || String(e));
 }
 
-/* --------------------------------------------- crash memory (localStorage) */
-/* mapSync can crash the whole renderer, which would lose everything on screen.
-   So we note which test is running, and remember results as we go. */
-var LS_IN = 'gpudiag.inflight', LS_PART = 'gpudiag.partial', LS_CRASH = 'gpudiag.crashed';
+/* ------------------------------------------------ persistence (localStorage) */
+/* Results survive app restarts, because a GPU loss needs a full app restart. */
+var K_RES = 'gpudiag3.results', K_NEXT = 'gpudiag3.next', K_IN = 'gpudiag3.inflight', K_SESS = 'gpudiag3.session';
 function lsGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
 function lsSet(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* storage unavailable */ } }
 function lsDel(k) { try { localStorage.removeItem(k); } catch (e) { /* ignore */ } }
-function mark(label) { lsSet(LS_IN, label); }
-function unmark() { lsDel(LS_IN); }
-function persist() {
-  lsSet(LS_PART, JSON.stringify(results.map(function (r) {
-    return { id: r.id, title: r.title, status: r.status, detail: r.detail, ms: r.ms };
-  })));
-}
-function crashedIds() { return (lsGet(LS_CRASH) || '').split(',').filter(Boolean); }
-function showPrevious() {
-  var inflight = lsGet(LS_IN);
-  if (!inflight) return;
-  var id = inflight.split(' ')[0];
-  var list = crashedIds();
-  if (list.indexOf(id) < 0) list.push(id);
-  lsSet(LS_CRASH, list.join(','));
-  lsDel(LS_IN);
-  var txt = 'THE PREVIOUS RUN DID NOT FINISH. The page was interrupted (crashed or closed) during:\n    ' + inflight +
-            '\nThat test will be skipped automatically from now on to avoid a crash loop.\nResults saved before the interruption:\n';
-  var part = [];
-  try { part = JSON.parse(lsGet(LS_PART) || '[]'); } catch (e) { part = []; }
-  part.forEach(function (r) {
-    txt += '    ' + r.id + ' ' + r.title + ' -> ' + r.status + '\n';
-    if (r.detail) txt += '        ' + String(r.detail).replace(/\n/g, '\n        ') + '\n';
-  });
-  var box = $('prev');
-  box.textContent = txt;
-  box.style.display = 'block';
+function loadRes() { try { return JSON.parse(lsGet(K_RES) || '{}'); } catch (e) { return {}; } }
+function saveRes(r) { lsSet(K_RES, JSON.stringify(r)); }
+function getNext() { return parseInt(lsGet(K_NEXT) || '0', 10) || 0; }
+function setNext(n) { lsSet(K_NEXT, String(n)); }
+function stageIndex(id) {
+  for (var i = 0; i < STAGES.length; i++) if (STAGES[i].id === id) return i;
+  return -1;
 }
 
-/* ---------------------------------------------------- device + instrument */
-async function getDevice(row) {
-  for (var i = 0; i < 6; i++) {
-    try {
-      var adapter = await withTimeout(navigator.gpu.requestAdapter(), 8000, 'requestAdapter');
-      if (adapter) {
-        var device = await withTimeout(adapter.requestDevice(), 8000, 'requestDevice');
-        return { adapter: adapter, device: device };
-      }
-      row.note = 'requestAdapter returned null (attempt ' + (i + 1) + ')';
-    } catch (e) {
-      row.note = errStr(e) + ' (attempt ' + (i + 1) + ')';
-    }
-    await sleep(1500); /* give a restarted GPU process time to come back */
-  }
-  return null;
-}
-
+/* ---------------------------------------------------------- device handling */
 function instrument(device, ctx) {
   ctx.lost = null;
   ctx.uncaptured = [];
-  ctx.destroying = false;
-  device.lost.then(function (info) {
-    if (!ctx.destroying) { ctx.lost = { reason: info.reason, message: info.message }; }
-  });
+  device.lost.then(function (info) { ctx.lost = { reason: info.reason, message: info.message }; });
   device.addEventListener('uncapturederror', function (ev) {
     var e = ev.error;
     ctx.uncaptured.push(((e && e.constructor && e.constructor.name) || 'GPUError') + ': ' + (e && e.message));
   });
 }
 
-async function runStage(id, title, fn) {
-  var row = { id: id, title: title, status: 'RUNNING', detail: '', ms: 0 };
-  results.push(row);
-  renderRows();
-  var t0 = performance.now();
-  mark(id + ' ' + title);
-
-  var got = await getDevice(row);
-  if (!got) {
-    row.status = 'SKIP';
-    row.detail = 'GPU did not (re)appear: ' + (row.note || 'no adapter');
-    row.ms = Math.round(performance.now() - t0);
-    unmark();
-    persist();
-    renderRows();
-    return row;
-  }
-  var device = got.device;
-  var ctx = {};
-  instrument(device, ctx);
-  device.pushErrorScope('validation');
-  device.pushErrorScope('out-of-memory');
-  device.pushErrorScope('internal');
-
-  var err = null;
-  try { await fn(device, ctx); } catch (e) { err = e; }
-
-  var scopeErrs = [];
-  var order = ['internal', 'out-of-memory', 'validation'];
-  for (var i = 0; i < order.length; i++) {
-    try {
-      var e2 = await withTimeout(device.popErrorScope(), 3000, 'popErrorScope(' + order[i] + ')');
-      if (e2) scopeErrs.push(order[i] + ' error: ' + e2.message);
-    } catch (e3) {
-      scopeErrs.push('error scopes unreadable (' + errStr(e3) + ')');
-      break;
-    }
-  }
-  await sleep(500); /* let device.lost settle before judging */
-
-  var parts = [];
-  if (err) parts.push('EXCEPTION  ' + errStr(err));
-  if (ctx.lost) parts.push('DEVICE LOST  reason=' + ctx.lost.reason + '  message=' + ctx.lost.message);
-  for (var s = 0; s < scopeErrs.length; s++) parts.push(scopeErrs[s]);
-  for (var u = 0; u < ctx.uncaptured.length; u++) parts.push('uncaptured  ' + ctx.uncaptured[u]);
-
-  row.status = parts.length === 0 ? 'PASS' : 'FAIL';
-  row.detail = parts.join('\n');
-  row.deviceLost = !!ctx.lost;
-  row.ms = Math.round(performance.now() - t0);
-
-  ctx.destroying = true;
-  try { device.destroy(); } catch (e4) { /* already lost */ }
-  unmark();
-  persist();
-  renderRows();
-  return row;
+/* Tiny buffer round trip: proves the device is alive and the queue drains. */
+async function probe(device, ctx) {
+  var b = device.createBuffer({ size: 16, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+  device.queue.writeBuffer(b, 0, new Uint32Array([1, 2, 3, 4]));
+  await withTimeout(device.queue.onSubmittedWorkDone(), 8000, 'health check: onSubmittedWorkDone');
+  await withTimeout(b.mapAsync(GPUMapMode.READ), 8000, 'health check: mapAsync');
+  b.unmap();
+  b.destroy();
+  await sleep(250);
+  if (ctx.lost) throw new Error('device lost during health check');
 }
 
-/* ------------------------------------------------------------ worker tests */
+var shared; /* undefined = not tried yet, null = unavailable, object = ready */
+async function getShared() {
+  if (shared !== undefined) return shared;
+  shared = null;
+  for (var i = 0; i < 3 && !shared; i++) {
+    try {
+      var adapter = await withTimeout(navigator.gpu.requestAdapter(), 8000, 'requestAdapter');
+      if (adapter) {
+        var device = await withTimeout(adapter.requestDevice(), 8000, 'requestDevice');
+        var ctx = {};
+        instrument(device, ctx);
+        await probe(device, ctx); /* pre-flight: is the GPU alive at session start? */
+        shared = { adapter: adapter, device: device, ctx: ctx };
+      }
+    } catch (e) { shared = null; }
+    if (!shared) await sleep(1000);
+  }
+  return shared;
+}
+
+
+/* ------------------------------------------------------------- test bodies */
+function expectEq(actual, expectFn, what) {
+  for (var i = 0; i < actual.length; i++) {
+    var want = expectFn(i);
+    if (actual[i] !== want) {
+      throw new Error(what + ' data mismatch at [' + i + ']: got ' + actual[i] + ', expected ' + want);
+    }
+  }
+}
+
+async function readBack(device, encoderFill, size) {
+  var dst = device.createBuffer({ size: size, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+  var enc = device.createCommandEncoder();
+  encoderFill(enc, dst);
+  device.queue.submit([enc.finish()]);
+  await withTimeout(dst.mapAsync(GPUMapMode.READ), 8000, 'mapAsync(READ)');
+  var copy = dst.getMappedRange().slice(0);
+  dst.unmap();
+  return copy;
+}
+
+async function tCopyRoundtrip(device) {
+  var N = 256;
+  var src = device.createBuffer({ size: N, usage: GPUBufferUsage.COPY_SRC, mappedAtCreation: true });
+  var w = new Uint32Array(src.getMappedRange());
+  for (var i = 0; i < w.length; i++) w[i] = i * 3 + 1;
+  src.unmap();
+  var buf = await readBack(device, function (enc, dst) { enc.copyBufferToBuffer(src, 0, dst, 0, N); }, N);
+  expectEq(new Uint32Array(buf), function (i) { return i * 3 + 1; }, 'copy');
+}
+
+async function tWriteBuffer(device) {
+  var N = 256;
+  var mid = device.createBuffer({ size: N, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC });
+  var data = new Uint32Array(N / 4);
+  for (var i = 0; i < data.length; i++) data[i] = i + 7;
+  device.queue.writeBuffer(mid, 0, data);
+  var buf = await readBack(device, function (enc, dst) { enc.copyBufferToBuffer(mid, 0, dst, 0, N); }, N);
+  expectEq(new Uint32Array(buf), function (i) { return i + 7; }, 'writeBuffer');
+}
+
+/* ---- compute ---- */
+var WGSL_EMPTY = '@compute @workgroup_size(1) fn main() {}';
+var WGSL_FIXED =
+  '@group(0) @binding(0) var<storage, read_write> out: array<u32, 64>;\n' +
+  '@compute @workgroup_size(64) fn main(@builtin(global_invocation_id) id: vec3u) {\n' +
+  '  out[id.x] = id.x * 2u + 1u;\n}\n';
+var WGSL_ARRAYLEN =
+  '@group(0) @binding(0) var<storage, read_write> out: array<u32>;\n' +
+  '@compute @workgroup_size(64) fn main(@builtin(global_invocation_id) id: vec3u) {\n' +
+  '  if (id.x < arrayLength(&out)) { out[id.x] = id.x * 2u + 1u; }\n}\n';
+var WGSL_WORKGROUP =
+  'var<workgroup> tmp: array<u32, 64>;\n' +
+  '@group(0) @binding(0) var<storage, read_write> out: array<u32, 64>;\n' +
+  '@compute @workgroup_size(64) fn main(@builtin(local_invocation_index) li: u32) {\n' +
+  '  tmp[li] = li;\n  workgroupBarrier();\n  out[li] = tmp[63u - li];\n}\n';
+var odd = function (i) { return i * 2 + 1; };
+
+async function tShaderModule(device) {
+  var mod = device.createShaderModule({ code: WGSL_EMPTY });
+  var info = await withTimeout(mod.getCompilationInfo(), 8000, 'getCompilationInfo');
+  var errs = info.messages.filter(function (m) { return m.type === 'error'; });
+  if (errs.length) throw new Error('shader compile errors: ' + errs.map(function (m) { return m.message; }).join('; '));
+}
+
+async function tComputePipelineOnly(device) {
+  var mod = device.createShaderModule({ code: WGSL_EMPTY });
+  device.createComputePipeline({ layout: 'auto', compute: { module: mod, entryPoint: 'main' } });
+  /* no dispatch: the stage settle time + health check reveal a deferred crash */
+}
+
+async function tComputeNoop(device) {
+  var mod = device.createShaderModule({ code: WGSL_EMPTY });
+  var pipe = device.createComputePipeline({ layout: 'auto', compute: { module: mod, entryPoint: 'main' } });
+  var enc = device.createCommandEncoder();
+  var pass = enc.beginComputePass();
+  pass.setPipeline(pipe);
+  pass.dispatchWorkgroups(1);
+  pass.end();
+  device.queue.submit([enc.finish()]);
+  await withTimeout(device.queue.onSubmittedWorkDone(), 8000, 'onSubmittedWorkDone');
+}
+
+async function computeRoundtrip(device, code, expectFn, useAsync) {
+  var mod = device.createShaderModule({ code: code });
+  var desc = { layout: 'auto', compute: { module: mod, entryPoint: 'main' } };
+  var pipe = useAsync
+    ? await withTimeout(device.createComputePipelineAsync(desc), 8000, 'createComputePipelineAsync')
+    : device.createComputePipeline(desc);
+  var storage = device.createBuffer({ size: 256, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC });
+  var bg = device.createBindGroup({
+    layout: pipe.getBindGroupLayout(0),
+    entries: [{ binding: 0, resource: { buffer: storage } }]
+  });
+  var buf = await readBack(device, function (enc, dst) {
+    var pass = enc.beginComputePass();
+    pass.setPipeline(pipe);
+    pass.setBindGroup(0, bg);
+    pass.dispatchWorkgroups(1);
+    pass.end();
+    enc.copyBufferToBuffer(storage, 0, dst, 0, 256);
+  }, 256);
+  expectEq(new Uint32Array(buf), expectFn, 'compute output');
+}
+
+/* ---- render ---- */
+var WGSL_TRI_BRANCH =
+  '@vertex fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4f {\n' +
+  '  if (i == 0u) { return vec4f(-1.0, -1.0, 0.0, 1.0); }\n' +
+  '  if (i == 1u) { return vec4f(3.0, -1.0, 0.0, 1.0); }\n' +
+  '  return vec4f(-1.0, 3.0, 0.0, 1.0);\n}\n' +
+  '@fragment fn fs() -> @location(0) vec4f { return vec4f(0.0, 1.0, 0.0, 1.0); }\n';
+var WGSL_TRI_ARRAY =
+  '@vertex fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4f {\n' +
+  '  var p = array<vec2f, 3>(vec2f(-1.0, -1.0), vec2f(3.0, -1.0), vec2f(-1.0, 3.0));\n' +
+  '  return vec4f(p[i], 0.0, 1.0);\n}\n' +
+  '@fragment fn fs() -> @location(0) vec4f { return vec4f(0.0, 1.0, 0.0, 1.0); }\n';
+
+function makeTarget(device) {
+  return device.createTexture({
+    size: [4, 4], format: 'rgba8unorm',
+    usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC
+  });
+}
+function makeRenderPipeline(device, code) {
+  var mod = device.createShaderModule({ code: code });
+  return device.createRenderPipeline({
+    layout: 'auto',
+    vertex: { module: mod, entryPoint: 'vs' },
+    fragment: { module: mod, entryPoint: 'fs', targets: [{ format: 'rgba8unorm' }] },
+    primitive: { topology: 'triangle-list' }
+  });
+}
+function checkGreen(buf) {
+  var px = new Uint8Array(buf, 0, 4);
+  if (px[0] !== 0 || px[1] !== 255 || px[2] !== 0 || px[3] !== 255) {
+    throw new Error('pixel mismatch: got [' + Array.prototype.join.call(px, ',') + '], expected [0,255,0,255]');
+  }
+}
+
+async function tTextureOnly(device) {
+  var tex = makeTarget(device);
+  tex.createView();
+  device.queue.submit([device.createCommandEncoder().finish()]);
+  await withTimeout(device.queue.onSubmittedWorkDone(), 8000, 'onSubmittedWorkDone');
+}
+
+async function tClearReadback(device) {
+  var tex = makeTarget(device);
+  var buf = await readBack(device, function (enc, dst) {
+    var pass = enc.beginRenderPass({ colorAttachments: [{
+      view: tex.createView(), clearValue: { r: 0, g: 1, b: 0, a: 1 }, loadOp: 'clear', storeOp: 'store' }] });
+    pass.end();
+    enc.copyTextureToBuffer({ texture: tex }, { buffer: dst, bytesPerRow: 256 }, [4, 4, 1]);
+  }, 1024);
+  checkGreen(buf);
+}
+
+async function tRenderPipelineOnly(device) {
+  makeRenderPipeline(device, WGSL_TRI_BRANCH);
+}
+
+function drawTest(code) {
+  return async function (device) {
+    var tex = makeTarget(device);
+    var pipe = makeRenderPipeline(device, code);
+    var buf = await readBack(device, function (enc, dst) {
+      var pass = enc.beginRenderPass({ colorAttachments: [{
+        view: tex.createView(), clearValue: { r: 0, g: 0, b: 0, a: 1 }, loadOp: 'clear', storeOp: 'store' }] });
+      pass.setPipeline(pipe);
+      pass.draw(3);
+      pass.end();
+      enc.copyTextureToBuffer({ texture: tex }, { buffer: dst, bytesPerRow: 256 }, [4, 4, 1]);
+    }, 1024);
+    checkGreen(buf);
+  };
+}
+
+/* ------------------------------------------------------------- worker tests */
 /* This function is stringified and run INSIDE a Worker. mapSync only exists
    there (GPUBuffer.mapSync is Exposed=Worker, behind an experimental flag). */
 function workerMain() {
@@ -286,287 +400,198 @@ function runWorker(test) {
   });
 }
 
-async function runWorkerStage(id, title, test) {
-  var row = { id: id, title: title, status: 'RUNNING', detail: '', ms: 0 };
-  results.push(row);
-  renderRows();
+/* ------------------------------------------------------------------- stages */
+/* settle = ms to wait before the health check (pipeline compiles may be deferred).
+   requires = stages that must not have failed, otherwise this one is pointless:
+   it would just kill the GPU again and cost you another restart. */
+var STAGES = [
+  { id: 'A1', title: 'Buffer copy -> mapAsync (no shader)',              fn: tCopyRoundtrip },
+  { id: 'A2', title: 'queue.writeBuffer -> copy -> mapAsync',            fn: tWriteBuffer },
+  { id: 'B1', title: 'Compute: createShaderModule + compile info only',  fn: tShaderModule },
+  { id: 'B2', title: 'Compute: createComputePipeline only (no dispatch)', fn: tComputePipelineOnly, settle: 1500 },
+  { id: 'B3', title: 'Compute: dispatch an EMPTY pipeline',              fn: tComputeNoop, requires: ['B2'] },
+  { id: 'B4', title: 'Compute: write a storage buffer (fixed array)',    fn: function (d) { return computeRoundtrip(d, WGSL_FIXED, odd, false); }, requires: ['B2'] },
+  { id: 'B5', title: 'Compute: arrayLength() on a storage buffer',       fn: function (d) { return computeRoundtrip(d, WGSL_ARRAYLEN, odd, false); }, requires: ['B2'] },
+  { id: 'B6', title: 'Compute: workgroup memory + barrier',              fn: function (d) { return computeRoundtrip(d, WGSL_WORKGROUP, function (i) { return 63 - i; }, false); }, requires: ['B2'] },
+  { id: 'B7', title: 'Compute: createComputePipelineAsync',              fn: function (d) { return computeRoundtrip(d, WGSL_FIXED, odd, true); }, requires: ['B2'] },
+  { id: 'C1', title: 'Render: create a render-target texture',           fn: tTextureOnly },
+  { id: 'C2', title: 'Render: clear-only pass + texture -> buffer copy', fn: tClearReadback, requires: ['C1'] },
+  { id: 'C3', title: 'Render: createRenderPipeline only (no draw)',      fn: tRenderPipelineOnly, settle: 1500, requires: ['C1'] },
+  { id: 'C4', title: 'Render: draw (branching vertex shader)',           fn: drawTest(WGSL_TRI_BRANCH), requires: ['C1', 'C3'] },
+  { id: 'C5', title: 'Render: draw (array-indexed vertex shader)',       fn: drawTest(WGSL_TRI_ARRAY), requires: ['C1', 'C3'] },
+  { id: 'W1', title: 'Worker: buffer copy -> mapAsync (no compute)',     test: 'async-copy',    worker: true },
+  { id: 'W2', title: 'Worker: compute -> mapAsync',                      test: 'async-compute', worker: true, requires: ['B2'] },
+  { id: 'W3', title: 'Worker: buffer copy -> mapSync (no compute)',      test: 'sync-copy',     worker: true },
+  { id: 'W4', title: 'Worker: compute -> mapSync (pattern that failed)', test: 'sync-compute',  worker: true, requires: ['B2'] }
+];
+
+var CAUSE = {
+  A1: 'a plain buffer copy + mapAsync fails: buffer readback or basic device health is broken.',
+  A2: 'queue.writeBuffer + copy + mapAsync fails.',
+  B1: 'creating/validating a compute shader module (CPU-side) kills the GPU.',
+  B2: 'CREATING a compute pipeline (no dispatch at all) kills the GPU: the driver crashes while building the pipeline state. Compute is dead for this reason, not because of dispatch.',
+  B3: 'dispatching an empty compute pipeline kills the GPU, although creating it survived.',
+  B4: 'a compute shader that writes a storage buffer kills the GPU (an empty dispatch survived): the storage-buffer (UAV) path.',
+  B5: 'arrayLength() on a storage buffer kills the GPU.',
+  B6: 'workgroup memory + barrier kills the GPU.',
+  B7: 'createComputePipelineAsync kills the GPU although the synchronous version survived.',
+  C1: 'creating a render-target texture kills the GPU.',
+  C2: 'a clear-only render pass + texture->buffer copy kills the GPU (no pipeline involved).',
+  C3: 'CREATING a render pipeline (no draw) kills the GPU: same class of failure as B2 if that failed too.',
+  C4: 'drawing with a trivial render pipeline kills the GPU, although creating it survived.',
+  C5: 'the array-indexed vertex shader kills the GPU while the branching one survived: a shader-pattern-specific driver bug.',
+  W1: 'a plain buffer copy + mapAsync fails inside a worker: workers + WebGPU are broken here.',
+  W2: 'compute breaks inside a worker even with mapAsync.',
+  W3: 'mapSync fails even with NO compute: the experimental mapSync path is the problem, not compute.',
+  W4: 'mapSync fails after a compute dispatch.'
+};
+
+/* ------------------------------------------------------------- stage runners */
+async function runMainStage(st, sh) {
+  var device = sh.device, ctx = sh.ctx;
   var t0 = performance.now();
-  mark(id + ' ' + title);
-  var r = await runWorker(test);
-  unmark();
+  ctx.uncaptured.length = 0;
+  device.pushErrorScope('validation');
+  device.pushErrorScope('out-of-memory');
+  device.pushErrorScope('internal');
+  var err = null, probeErr = null;
+  try { await st.fn(device); } catch (e) { err = e; }
+  if (!ctx.lost) {
+    try { await sleep(st.settle || 300); await probe(device, ctx); } catch (e2) { probeErr = e2; }
+  }
+  var scopeErrs = [];
+  var order = ['internal', 'out-of-memory', 'validation'];
+  for (var i = 0; i < order.length; i++) {
+    try {
+      var e3 = await withTimeout(device.popErrorScope(), 3000, 'popErrorScope(' + order[i] + ')');
+      if (e3) scopeErrs.push(order[i] + ' error: ' + e3.message);
+    } catch (e4) { scopeErrs.push('error scopes unreadable (' + errStr(e4) + ')'); break; }
+  }
+  await sleep(400);
+  var parts = [];
+  if (err) parts.push('EXCEPTION  ' + errStr(err));
+  if (probeErr) parts.push('HEALTH CHECK AFTER THIS STEP FAILED  ' + errStr(probeErr));
+  if (ctx.lost) parts.push('DEVICE LOST  reason=' + ctx.lost.reason + '  message=' + ctx.lost.message);
+  scopeErrs.forEach(function (x) { parts.push(x); });
+  ctx.uncaptured.forEach(function (x) { parts.push('uncaptured  ' + x); });
+  return { status: parts.length ? 'FAIL' : 'PASS', detail: parts.join('\n'),
+           ms: Math.round(performance.now() - t0), gpuLost: !!ctx.lost };
+}
+
+async function runWorkerStageOnce(st, sh) {
+  var t0 = performance.now();
+  var r = await runWorker(st.test);
+  var out = { status: 'PASS', detail: '', gpuLost: false };
   if (r.skipped) {
-    row.status = 'SKIP';
-    row.detail = r.skipped;
+    out.status = 'SKIP';
+    out.detail = r.skipped;
   } else {
     var parts = [];
     if (r.hostError) parts.push(r.hostError);
     if (r.error) parts.push('EXCEPTION  ' + r.error);
     if (r.lost) parts.push('DEVICE LOST  ' + r.lost);
-    row.status = parts.length === 0 ? 'PASS' : 'FAIL';
-    row.detail = parts.join('\n');
-    row.deviceLost = !!r.lost;
+    out.status = parts.length ? 'FAIL' : 'PASS';
+    out.detail = parts.join('\n');
+    out.gpuLost = !!r.lost;
   }
-  row.ms = Math.round(performance.now() - t0);
-  persist();
-  renderRows();
-  return row;
-}
-
-/* ------------------------------------------------------------- test bodies */
-function expectEq(actual, expectFn, what) {
-  for (var i = 0; i < actual.length; i++) {
-    var want = expectFn(i);
-    if (actual[i] !== want) {
-      throw new Error(what + ' data mismatch at [' + i + ']: got ' + actual[i] + ', expected ' + want);
-    }
+  if (sh && !out.gpuLost) { /* did the worker's trouble take the whole GPU down? */
+    try { await sleep(300); await probe(sh.device, sh.ctx); } catch (e) { out.gpuLost = true; out.detail += (out.detail ? '\n' : '') + 'main-thread health check afterwards failed: ' + errStr(e); out.status = 'FAIL'; }
   }
+  out.ms = Math.round(performance.now() - t0);
+  return out;
 }
-
-async function readBack(device, encoderFill, size) {
-  var dst = device.createBuffer({ size: size, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
-  var enc = device.createCommandEncoder();
-  encoderFill(enc, dst);
-  device.queue.submit([enc.finish()]);
-  await withTimeout(dst.mapAsync(GPUMapMode.READ), 8000, 'mapAsync(READ)');
-  var copy = dst.getMappedRange().slice(0);
-  dst.unmap();
-  return copy;
-}
-
-async function tCopyRoundtrip(device) {
-  var N = 256;
-  var src = device.createBuffer({ size: N, usage: GPUBufferUsage.COPY_SRC, mappedAtCreation: true });
-  var w = new Uint32Array(src.getMappedRange());
-  for (var i = 0; i < w.length; i++) w[i] = i * 3 + 1;
-  src.unmap();
-  var buf = await readBack(device, function (enc, dst) { enc.copyBufferToBuffer(src, 0, dst, 0, N); }, N);
-  expectEq(new Uint32Array(buf), function (i) { return i * 3 + 1; }, 'copy');
-}
-
-async function tWriteBuffer(device) {
-  var N = 256;
-  var mid = device.createBuffer({ size: N, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC });
-  var data = new Uint32Array(N / 4);
-  for (var i = 0; i < data.length; i++) data[i] = i + 7;
-  device.queue.writeBuffer(mid, 0, data);
-  var buf = await readBack(device, function (enc, dst) { enc.copyBufferToBuffer(mid, 0, dst, 0, N); }, N);
-  expectEq(new Uint32Array(buf), function (i) { return i + 7; }, 'writeBuffer');
-}
-
-async function tRender(device) {
-  var tex = device.createTexture({
-    size: [4, 4], format: 'rgba8unorm',
-    usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC
-  });
-  var mod = device.createShaderModule({ code:
-    '@vertex fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4f {\n' +
-    '  var p = array<vec2f, 3>(vec2f(-1.0, -1.0), vec2f(3.0, -1.0), vec2f(-1.0, 3.0));\n' +
-    '  return vec4f(p[i], 0.0, 1.0);\n' +
-    '}\n' +
-    '@fragment fn fs() -> @location(0) vec4f { return vec4f(0.0, 1.0, 0.0, 1.0); }\n' });
-  var pipe = device.createRenderPipeline({
-    layout: 'auto',
-    vertex: { module: mod, entryPoint: 'vs' },
-    fragment: { module: mod, entryPoint: 'fs', targets: [{ format: 'rgba8unorm' }] },
-    primitive: { topology: 'triangle-list' }
-  });
-  var buf = await readBack(device, function (enc, dst) {
-    var pass = enc.beginRenderPass({ colorAttachments: [{
-      view: tex.createView(), clearValue: { r: 0, g: 0, b: 0, a: 1 }, loadOp: 'clear', storeOp: 'store' }] });
-    pass.setPipeline(pipe);
-    pass.draw(3);
-    pass.end();
-    enc.copyTextureToBuffer({ texture: tex }, { buffer: dst, bytesPerRow: 256 }, [4, 4, 1]);
-  }, 1024);
-  var px = new Uint8Array(buf, 0, 4);
-  if (px[0] !== 0 || px[1] !== 255 || px[2] !== 0 || px[3] !== 255) {
-    throw new Error('render pixel mismatch: got [' + Array.prototype.join.call(px, ',') + '], expected [0,255,0,255]');
-  }
-}
-
-async function tComputeNoop(device) {
-  var mod = device.createShaderModule({ code: '@compute @workgroup_size(1) fn main() {}' });
-  var pipe = device.createComputePipeline({ layout: 'auto', compute: { module: mod, entryPoint: 'main' } });
-  var enc = device.createCommandEncoder();
-  var pass = enc.beginComputePass();
-  pass.setPipeline(pipe);
-  pass.dispatchWorkgroups(1);
-  pass.end();
-  device.queue.submit([enc.finish()]);
-  await withTimeout(device.queue.onSubmittedWorkDone(), 8000, 'onSubmittedWorkDone');
-}
-
-async function computeRoundtrip(device, code, expectFn, useAsync) {
-  var mod = device.createShaderModule({ code: code });
-  var desc = { layout: 'auto', compute: { module: mod, entryPoint: 'main' } };
-  var pipe = useAsync
-    ? await withTimeout(device.createComputePipelineAsync(desc), 8000, 'createComputePipelineAsync')
-    : device.createComputePipeline(desc);
-  var storage = device.createBuffer({ size: 256, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC });
-  var bg = device.createBindGroup({
-    layout: pipe.getBindGroupLayout(0),
-    entries: [{ binding: 0, resource: { buffer: storage } }]
-  });
-  var buf = await readBack(device, function (enc, dst) {
-    var pass = enc.beginComputePass();
-    pass.setPipeline(pipe);
-    pass.setBindGroup(0, bg);
-    pass.dispatchWorkgroups(1);
-    pass.end();
-    enc.copyBufferToBuffer(storage, 0, dst, 0, 256);
-  }, 256);
-  expectEq(new Uint32Array(buf), expectFn, 'compute output');
-}
-
-var WGSL_FIXED =
-  '@group(0) @binding(0) var<storage, read_write> out: array<u32, 64>;\n' +
-  '@compute @workgroup_size(64) fn main(@builtin(global_invocation_id) id: vec3u) {\n' +
-  '  out[id.x] = id.x * 2u + 1u;\n}\n';
-var WGSL_ARRAYLEN =
-  '@group(0) @binding(0) var<storage, read_write> out: array<u32>;\n' +
-  '@compute @workgroup_size(64) fn main(@builtin(global_invocation_id) id: vec3u) {\n' +
-  '  if (id.x < arrayLength(&out)) { out[id.x] = id.x * 2u + 1u; }\n}\n';
-var WGSL_WORKGROUP =
-  'var<workgroup> tmp: array<u32, 64>;\n' +
-  '@group(0) @binding(0) var<storage, read_write> out: array<u32, 64>;\n' +
-  '@compute @workgroup_size(64) fn main(@builtin(local_invocation_index) li: u32) {\n' +
-  '  tmp[li] = li;\n  workgroupBarrier();\n  out[li] = tmp[63u - li];\n}\n';
-
-var odd = function (i) { return i * 2 + 1; };
-
-var STAGES = [
-  ['T1', 'Buffer copy -> mapAsync (no shader)',            tCopyRoundtrip],
-  ['T2', 'queue.writeBuffer -> copy -> mapAsync',          tWriteBuffer],
-  ['T3', 'Render pipeline draw -> readback (mapAsync)',    tRender],
-  ['T4', 'Compute dispatch, NO resources',                 tComputeNoop],
-  ['T5', 'Compute writes storage buffer (fixed array)',    function (d) { return computeRoundtrip(d, WGSL_FIXED, odd, false); }],
-  ['T6', 'Compute + arrayLength() on storage buffer',      function (d) { return computeRoundtrip(d, WGSL_ARRAYLEN, odd, false); }],
-  ['T7', 'Compute + workgroup memory + barrier',           function (d) { return computeRoundtrip(d, WGSL_WORKGROUP, function (i) { return 63 - i; }, false); }],
-  ['T8', 'Compute via createComputePipelineAsync',         function (d) { return computeRoundtrip(d, WGSL_FIXED, odd, true); }],
-  ['T9', 'Recovery check: buffer copy -> mapAsync again',  tCopyRoundtrip],
-  /* Worker tests last: mapSync can crash the renderer, and mapAsync-in-worker is the control. */
-  ['W1', 'Worker: buffer copy -> mapAsync (no compute)',   'async-copy',    'worker'],
-  ['W2', 'Worker: compute -> mapAsync',                    'async-compute', 'worker'],
-  ['W3', 'Worker: buffer copy -> mapSync (no compute)',    'sync-copy',     'worker'],
-  ['W4', 'Worker: compute -> mapSync (pattern that failed)', 'sync-compute', 'worker']
-];
 
 /* ------------------------------------------------------------------ verdict */
 function noGpuLines() {
   var l = ['navigator.gpu is MISSING on this page.',
            'Page URL: ' + location.href + '   isSecureContext: ' + window.isSecureContext];
   if (!window.isSecureContext) {
-    l.push('Chromium only exposes navigator.gpu to secure contexts (https://, localhost). This page is NOT one, so WebGPU is hidden from it even though the flags may be active. Open it over https://.');
+    l.push('Chromium only exposes navigator.gpu to secure contexts. Open this page over https://.');
   } else {
-    l.push('The page IS a secure context, so the WebGPU flags did not reach this renderer (or WebGPU is disabled in this browser session).');
+    l.push('The page IS a secure context, so the WebGPU flags did not reach this renderer.');
   }
   return l;
 }
 
-function verdict(r) {
-  var by = {};
-  r.forEach(function (x) { by[x.id] = x.status; });
-  var out = [];
-  var ok = function (id) { return by[id] === 'PASS'; };
-  var bad = function (id) { return by[id] === 'FAIL'; };
+function verdict(res) {
   if (!navigator.gpu) return noGpuLines();
-
-  if (bad('T1') || bad('T2')) {
-    out.push('Plain buffer copy + mapAsync fails with NO shader involved. The problem is buffer readback / device health itself, not compute.');
-  }
-  if (ok('T1') && ok('T2') && bad('T3')) {
-    out.push('Buffers and mapAsync work, but the RENDER test fails - unexpected; see its detail.');
-  }
-  if (ok('T1') && ok('T3') && bad('T4')) {
-    out.push('Even an EMPTY compute dispatch (no buffers) fails: the dispatch / compute pipeline itself is the trigger.');
-  } else if (ok('T4') && bad('T5')) {
-    out.push('Empty dispatch works but writing a STORAGE BUFFER from compute fails: the storage-buffer (UAV) path is the trigger.');
-  } else if (ok('T5') && bad('T6')) {
-    out.push('Storage writes work but arrayLength() fails: the buffer-size-query / robustness path is the trigger.');
-  } else if (ok('T5') && ok('T6') && bad('T7')) {
-    out.push('Storage writes work but workgroup memory + barrier fails: workgroup init / shared memory is the trigger.');
-  } else if (ok('T5') && bad('T8')) {
-    out.push('Synchronous compute pipelines work but createComputePipelineAsync fails: the async pipeline path is the trigger.');
-  }
-  var allCompute = ['T4', 'T5', 'T6', 'T7', 'T8'];
-  if (allCompute.every(ok) && ok('T1') && ok('T3')) {
-    out.push('ALL main-thread compute tests PASS on this console. Compute itself works here.');
-  }
-  if (by['W1'] !== undefined) {
-    if (by['W3'] === 'SKIP') {
-      out.push('GPUBuffer.mapSync is NOT exposed in workers in this session, so a test that reports a mapSync failure is not running in this exact configuration.');
-    }
-    if (ok('W1') && ok('W2') && bad('W3')) {
-      out.push('mapAsync works in a worker, but mapSync FAILS even with NO compute (W3). The experimental mapSync path is the problem, not compute.');
-    } else if (ok('W3') && bad('W4')) {
-      out.push('mapSync works for a plain copy but fails after a compute dispatch (W4).');
-    } else if (ok('W2') && ok('W3') && ok('W4')) {
-      out.push('mapSync AND compute both work in a worker here. The failing test must be doing something more specific - send me its full error text.');
-    } else if (ok('W1') && bad('W2')) {
-      out.push('Compute breaks inside a worker even with mapAsync (W2).');
-    } else if (bad('W1')) {
-      out.push('Even a plain buffer copy + mapAsync fails inside a worker (W1): workers + WebGPU are broken here.');
-    }
-  }
-  r.filter(function (x) { return x.crashedBefore; }).forEach(function (x) {
-    out.push(x.id + ' (' + x.title + ') crashed the PAGE ITSELF on a previous run - the renderer died, not just the GPU device.');
+  var out = [];
+  var ran = STAGES.filter(function (s) { return res[s.id]; });
+  if (ran.length === 0) return ['No tests have run yet.'];
+  var st = function (id) { return res[id] ? res[id].status : undefined; };
+  var failed = STAGES.filter(function (s) { return st(s.id) === 'FAIL'; });
+  failed.forEach(function (s) {
+    var r = res[s.id];
+    if (r.crashed) out.push(s.id + ': the PAGE ITSELF crashed during this test (the renderer died, not just the GPU device).');
+    else out.push(s.id + ' is where the GPU dies: ' + (CAUSE[s.id] || 'see detail.'));
   });
-  var firstFail = r.filter(function (x) { return x.status === 'FAIL' && !x.crashedBefore; })[0];
-  if (firstFail) {
-    if (r.some(function (x) { return x.status === 'FAIL' && x.deviceLost; })) {
-      out.push('At least one test lost the GPU device (see DEVICE LOST lines). The reason/message text there is the ground truth for what happened.');
-    }
-    if (ok('T9') && r.some(function (x) { return x.id !== 'T9' && x.status === 'FAIL' && !x.crashedBefore; })) {
-      out.push('The recovery check passed, so the GPU came back after the failure (a crash + GPU-process restart, not a permanent break).');
-    } else if (bad('T9') || by['T9'] === 'SKIP') {
-      out.push('The recovery check did NOT pass - the GPU did not come back cleanly after the failure.');
-    }
+  if (st('B2') === 'FAIL' && st('C3') === 'FAIL') {
+    out.push('Both compute AND render pipeline creation kill the GPU: the problem is pipeline/shader creation in the driver in general, not compute specifically.');
   }
-  if (out.length === 0) out.push('Inconclusive - read the per-test details.');
+  if (st('B2') === 'PASS' && st('C3') === 'FAIL') {
+    out.push('Compute pipeline creation survives but render pipeline creation does not.');
+  }
+  if (st('W1') === 'PASS' && st('W3') === 'FAIL') {
+    out.push('mapAsync works in a worker but mapSync fails.');
+  }
+  if (st('W3') === 'SKIP') {
+    out.push('GPUBuffer.mapSync is NOT exposed in workers in this session.');
+  }
+  var allPass = STAGES.every(function (s) { return st(s.id) === 'PASS' || st(s.id) === 'SKIP'; }) && failed.length === 0;
+  var complete = STAGES.every(function (s) { return res[s.id]; });
+  if (complete && allPass) out.push('Every test passed: compute, rendering and worker mapSync all work on this console.');
+  if (!complete) out.push((STAGES.length - Object.keys(res).length) + ' test(s) still to run.');
   return out;
 }
 
 /* ------------------------------------------------------------------- render */
-var results = [];
-var envText = '';
-
+var runningId = null;
 function renderRows() {
+  var res = loadRes();
   var body = $('rows');
   while (body.firstChild) body.removeChild(body.firstChild);
-  STAGES.forEach(function (st) {
-    var row = results.filter(function (x) { return x.id === st[0]; })[0];
+  STAGES.forEach(function (stg) {
+    var r = res[stg.id];
+    var status = stg.id === runningId ? 'RUNNING' : (r ? r.status : 'PENDING');
     var tr = document.createElement('tr');
     function cell(text, cls) {
       var td = document.createElement('td');
       td.textContent = text;
       if (cls) td.className = cls;
       tr.appendChild(td);
-      return td;
     }
-    cell(st[0]);
-    cell(st[1]);
-    cell(row ? row.status : 'pending', row ? row.status : 'PENDING');
-    cell(row && row.ms ? String(row.ms) : '');
-    cell(row ? row.detail : '', 'detail');
+    cell(stg.id);
+    cell(stg.title);
+    cell(status === 'PENDING' ? 'pending' : status, status);
+    cell(r && r.ms ? String(r.ms) : '');
+    cell(r && r.detail ? r.detail : '', 'detail');
     body.appendChild(tr);
   });
 }
-
-function renderVerdict(lines) {
+function renderVerdict() {
   var v = $('verdict');
   while (v.firstChild) v.removeChild(v.firstChild);
-  lines.forEach(function (l) {
+  verdict(loadRes()).forEach(function (l) {
     var d = document.createElement('div');
     d.textContent = l;
     v.appendChild(d);
   });
 }
-
-function reportText(vlines) {
-  var t = 'Onitor WebGPU compute diagnostic\n\nVERDICT\n' + vlines.join('\n') + '\n\nTESTS\n';
-  results.forEach(function (r) {
-    t += r.id + ' ' + r.title + ' -> ' + r.status + ' (' + r.ms + ' ms)\n';
-    if (r.detail) t += '    ' + r.detail.replace(/\n/g, '\n    ') + '\n';
+function notice(text) {
+  var n = $('notice');
+  if (!text) { n.style.display = 'none'; n.textContent = ''; return; }
+  n.textContent = text;
+  n.style.display = 'block';
+}
+var envText = '';
+function reportText() {
+  var res = loadRes();
+  var t = 'Onitor WebGPU compute diagnostic v3\n\nVERDICT\n' +
+    Array.prototype.map.call($('verdict').children, function (d) { return d.textContent; }).join('\n') + '\n\nTESTS\n';
+  STAGES.forEach(function (s) {
+    var r = res[s.id];
+    t += s.id + ' ' + s.title + ' -> ' + (r ? r.status + ' (' + (r.ms || 0) + ' ms)' : 'pending') + '\n';
+    if (r && r.detail) t += '    ' + r.detail.replace(/\n/g, '\n    ') + '\n';
   });
   return t + '\nENVIRONMENT\n' + envText;
 }
@@ -576,21 +601,22 @@ async function collectEnv() {
   var lines = [];
   lines.push('location: ' + location.href);
   lines.push('isSecureContext: ' + window.isSecureContext + '   origin: ' + location.origin + '   top-level: ' + (window === window.top));
-  lines.push("'gpu' in navigator: " + ('gpu' in navigator) + '   typeof GPU: ' + typeof window.GPU + '   typeof GPUBuffer: ' + typeof window.GPUBuffer);
-  lines.push('mapSync on main thread: ' + (typeof window.GPUBuffer !== 'undefined' ? typeof GPUBuffer.prototype.mapSync : 'n/a') + '  (expected undefined: it is worker-only)');
   lines.push('userAgent: ' + navigator.userAgent);
   lines.push('hardwareConcurrency: ' + navigator.hardwareConcurrency + '   deviceMemory: ' + navigator.deviceMemory);
   if (!navigator.gpu) { lines.push('navigator.gpu: MISSING'); return lines.join('\n'); }
   try {
     var adapter = await withTimeout(navigator.gpu.requestAdapter(), 8000, 'requestAdapter');
-    if (!adapter) { lines.push('requestAdapter: null'); }
+    if (!adapter) { lines.push('requestAdapter: null  (GPU unavailable - after a GPU loss the app must be fully quit and reopened)'); }
     else {
       var info = adapter.info || {};
       ['vendor', 'architecture', 'device', 'description', 'subgroupMinSize', 'subgroupMaxSize'].forEach(function (k) {
         try { lines.push('adapter.' + k + ': ' + info[k]); } catch (e) { /* ignore */ }
       });
-      lines.push('adapter.isFallbackAdapter: ' + (adapter.isFallbackAdapter));
-      lines.push('features: ' + Array.from(adapter.features).sort().join(', '));
+      var feats = Array.from(adapter.features).sort();
+      lines.push('features: ' + feats.join(', '));
+      var has = function (f) { return feats.indexOf(f) >= 0; };
+      lines.push('compiler hints: subgroups=' + has('subgroups') + ' (DXC compiler active)   subgroup-size-control=' +
+        has('subgroup-size-control') + ' (needs SM 6.6)   shader-f16=' + has('shader-f16') + ' (needs SM 6.2 + native f16)');
       var lim = adapter.limits, keys = ['maxStorageBuffersPerShaderStage', 'maxStorageBufferBindingSize',
         'maxComputeWorkgroupSizeX', 'maxComputeInvocationsPerWorkgroup', 'maxComputeWorkgroupStorageSize',
         'maxBufferSize', 'maxBindGroups'];
@@ -606,59 +632,106 @@ async function collectEnv() {
 }
 
 /* --------------------------------------------------------------------- main */
+function reconcileCrash() {
+  var id = lsGet(K_IN);
+  if (!id) return;
+  lsDel(K_IN);
+  var i = stageIndex(id);
+  if (i < 0) return;
+  var res = loadRes();
+  res[id] = { status: 'FAIL', crashed: true, ms: 0,
+    detail: 'THE PAGE ITSELF CRASHED (or was closed) during this test. It is not retried automatically.' };
+  saveRes(res);
+  if (getNext() <= i) setNext(i + 1);
+}
+
 var running = false;
 async function runAll() {
   if (running) return;
   running = true;
-  results = [];
-  persist();
-  renderRows();
-  renderVerdict(['Running... (a failing test can take ~15 s while the GPU process restarts)']);
-  $('env').textContent = 'collecting...';
   try {
+    notice('');
+    var sess = (parseInt(lsGet(K_SESS) || '0', 10) || 0) + 1;
+    lsSet(K_SESS, String(sess));
+    renderRows();
+    renderVerdict();
     envText = await collectEnv();
-    $('env').textContent = envText;
-    if (!navigator.gpu) {
-      renderVerdict(verdict([]));
-      return;
-    }
-    var crashed = crashedIds();
-    for (var i = 0; i < STAGES.length; i++) {
-      var st = STAGES[i];
-      if (crashed.indexOf(st[0]) >= 0) {
-        results.push({ id: st[0], title: st[1], status: 'FAIL', ms: 0, crashedBefore: true,
-          detail: 'CRASHED THE PAGE on a previous run - skipped now to avoid a crash loop. (Press "Clear crash memory" to try again.)' });
-        persist();
-        renderRows();
+    $('env').textContent = envText + '\nsession: ' + sess;
+    if (!navigator.gpu) return;
+
+    var start = getNext();
+    if (start >= STAGES.length) { notice('All tests are done. Press "Start over" to run them again.'); return; }
+
+    for (var i = start; i < STAGES.length; i++) {
+      var stg = STAGES[i];
+      var res = loadRes();
+
+      /* skip tests whose prerequisite already kills the GPU */
+      var blocked = (stg.requires || []).filter(function (r) { return res[r] && res[r].status === 'FAIL'; });
+      if (blocked.length) {
+        res[stg.id] = { status: 'SKIP', ms: 0, detail: 'Not run: ' + blocked.join(', ') + ' already kills the GPU, so this would only cost another restart.' };
+        saveRes(res); setNext(i + 1); renderRows(); renderVerdict();
         continue;
       }
-      if (st[3] === 'worker') await runWorkerStage(st[0], st[1], st[2]);
-      else await runStage(st[0], st[1], st[2]);
-      await sleep(400);
+
+      var sh = await getShared();
+      if (!sh) {
+        notice('The GPU is not available right now (requestAdapter failed or the health check failed). ' +
+               'FULLY QUIT the app (do not just switch away), reopen it, and open this page again. ' +
+               'No test was used up; it will continue with ' + stg.id + '.');
+        return;
+      }
+
+      runningId = stg.id;
+      lsSet(K_IN, stg.id);
+      renderRows();
+      var out = stg.worker ? await runWorkerStageOnce(stg, sh) : await runMainStage(stg, sh);
+      lsDel(K_IN);
+      runningId = null;
+
+      res = loadRes();
+      res[stg.id] = { status: out.status, detail: out.detail, ms: out.ms };
+      saveRes(res);
+      setNext(i + 1);
+      renderRows();
+      renderVerdict();
+
+      if (out.gpuLost) {
+        var more = i + 1 < STAGES.length;
+        notice('The GPU died during ' + stg.id + ' (' + stg.title + '). ' +
+               (more ? 'FULLY QUIT the app (do not just switch away), reopen it, and open this page again: it continues with the next test automatically.'
+                     : 'That was the last test.'));
+        return;
+      }
+      await sleep(300);
     }
-    renderVerdict(verdict(results));
+    notice('All tests are done. Press "Copy report" or take a screenshot.');
   } catch (e) {
-    renderVerdict(['Diagnostic page error: ' + errStr(e)]);
+    notice('Diagnostic page error: ' + errStr(e));
   } finally {
     running = false;
+    runningId = null;
+    renderRows();
+    renderVerdict();
   }
 }
 
-$('run').addEventListener('click', runAll);
-$('clearcrash').addEventListener('click', function () {
-  lsDel(LS_CRASH); lsDel(LS_IN); lsDel(LS_PART);
-  $('prev').style.display = 'none';
-  $('clearcrash').textContent = 'Crash memory cleared';
-});
+function startOver() {
+  [K_RES, K_NEXT, K_IN, K_SESS].forEach(lsDel);
+  shared = undefined;
+  runAll();
+}
+
+$('run').addEventListener('click', function () { if (getNext() >= STAGES.length) startOver(); else runAll(); });
+$('start').addEventListener('click', startOver);
 $('copy').addEventListener('click', function () {
-  var text = reportText(Array.prototype.map.call($('verdict').children, function (d) { return d.textContent; }));
   try {
-    navigator.clipboard.writeText(text).then(function () { $('copy').textContent = 'Copied'; },
-                                             function () { $('copy').textContent = 'Copy failed'; });
+    navigator.clipboard.writeText(reportText()).then(function () { $('copy').textContent = 'Copied'; },
+                                                     function () { $('copy').textContent = 'Copy failed'; });
   } catch (e) { $('copy').textContent = 'Copy unavailable'; }
 });
-window.__gpuDiag = { runAll: runAll, results: function () { return results; }, verdict: verdict, STAGES: STAGES };
-window.addEventListener('load', function () { showPrevious(); setTimeout(runAll, 300); });
+window.__gpuDiag = { runAll: runAll, results: loadRes, verdict: verdict, STAGES: STAGES, getNext: getNext };
+window.addEventListener('load', function () { reconcileCrash(); setTimeout(runAll, 300); });
 </script>
 </body>
 </html>
