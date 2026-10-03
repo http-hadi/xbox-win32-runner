@@ -428,7 +428,24 @@ namespace onitor.Classes
         // both intermediate rungs only ever burned two restarts on the way
         // to the same SwiftShader result. Pinned values survive as before.
         private const string LadderGenFileName = "webgpu-ladder-gen.txt";
-        private const string CurrentLadderGeneration = "gen6-1.6.4.0";
+        // gen7 (1.6.5.0): the software-detection name test now also matches
+        // vendor 'microsoft'. On Xbox the D3D12 WebGPU device reports
+        // vendor='microsoft' with an EMPTY description/architecture, so the
+        // gen6 test (which only looked for SwiftShader/llvmpipe/Basic
+        // Render/WARP) classified it as HARDWARE and painted a green
+        // "WebGPU: hardware OK" badge over an adapter that cannot run a
+        // single compute dispatch - the exact misleading state reported by
+        // users. Verified on console 2026-10-03: the D3D12 rung creates a
+        // device but the first compute dispatch returns
+        // DXGI_ERROR_DEVICE_REMOVED / DXGI_ERROR_DRIVER_INTERNAL_ERROR
+        // (0x887A0020) and takes ANGLE's D3D11 device down with it
+        // (Renderer11::testDeviceLost), i.e. WebGL dies too. Dawn's D3D11
+        // backend was re-tested against a WORKING probe and yields no device
+        // on the console's D3D11On12 layer (verdict 'fallback:swiftshader
+        // google'), and the OpenGLES backend is compiled out of win-UWP. So
+        // SwiftShader is the only Xbox WebGPU path on which compute works,
+        // and gen7 makes the probe/badge say so honestly.
+        private const string CurrentLadderGeneration = "gen7-1.6.5.0";
 
         /// <summary>
         /// Persisted WebGPU strategy (webgpu-mode.txt). "auto-*" values are
@@ -559,12 +576,15 @@ namespace onitor.Classes
       // SwiftShader adapter (ladder rung 4) reports isFallback=false, so the
       // flag alone lied in v1.4.0.0 (green badge with 'adapter: SwiftShader').
       var hay = d + ' ' + (info.vendor || '') + ' ' + (info.architecture || '');
-      var soft = fb || /swiftshader|software|llvmpipe|basic render|warp/i.test(hay);
+      var soft = fb || /swiftshader|software|llvmpipe|basic render|basicrender|warp|microsoft/i.test(hay);
       if (d) d = String(d);
       if (d.length > 46) d = d.slice(0, 45) + '\u2026';
+      var who = d || String(info.vendor || '');
       if (soft) {
-        paint('soft', 'WebGPU: software' + (/swiftshader/i.test(hay) ? ' \u00b7 SwiftShader' : ''),
-          (d ? 'adapter: ' + d : '') + (gl2 ? (d ? ' \u00b7 ' : '') + gl2 : ''));
+        var tag = /swiftshader/i.test(hay) ? ' \u00b7 SwiftShader'
+                : (/microsoft|warp|basic render/i.test(hay) ? ' \u00b7 Microsoft (no compute)' : '');
+        paint('soft', 'WebGPU: software' + tag,
+          (who ? 'adapter: ' + who : '') + (gl2 ? (who ? ' \u00b7 ' : '') + gl2 : ''));
       } else {
         paint('ok', 'WebGPU: hardware \u2713',
           (d ? 'adapter: ' + d : 'adapter: GPU') + (gl2 ? ' \u00b7 ' + gl2 : ''));
@@ -1221,7 +1241,7 @@ namespace onitor.Classes
                     "        try { var i=a.info||{}; d=i.description||''; ar=i.architecture||''; vn=i.vendor||'';" +
                     "          if(!d && !ar && !vn && typeof a.requestAdapterInfo==='function'){ var ri=a.requestAdapterInfo(); if(ri){ d=ri.description||''; ar=ri.architecture||''; vn=ri.vendor||''; } } } catch(e){}" +
                     "        var v=(ar?ar+' ':'')+vn;" +
-                    "        var soft = fb || /swiftshader|software|llvmpipe|basic render|warp/i.test(d+' '+v);" +
+                    "        var soft = fb || /swiftshader|software|llvmpipe|basic render|basicrender|warp|microsoft/i.test(d+' '+v);" +
                     "        window.__onitorWgpuProbe = (soft?'fallback:':'gpu:') + String(d||v).slice(0,90);" +
                     "      } catch(e){ window.__onitorWgpuProbe = 'error'; }" +
                     "    }, function(){ window.__onitorWgpuProbe = 'error'; });" +
@@ -1312,9 +1332,13 @@ namespace onitor.Classes
 
                 if (kind == "gpu")
                 {
+                    // Reachable only for an adapter that did NOT match the
+                    // software-name test. On Xbox the D3D12 device reports
+                    // vendor 'microsoft' and IS caught by that test, so this
+                    // branch now means "a real hardware adapter".
                     AppendWebGpuStatus("Hardware WebGPU adapter ACTIVE ('" + desc + "')" +
                         (mode == WebGpuMode.PinnedD3D12
-                            ? " - WARNING (d3d12 pin): rendering works but ANY compute pipeline kills the adapter at the driver level (gen6 evidence 2026-10-03); compute sites will crash."
+                            ? " - WARNING (d3d12 pin): rendering works but ANY compute pipeline kills the adapter at the driver level (verified 2026-10-03, reproduced 2026-10-03 gen7); compute sites will crash."
                             : " - running on the console GPU."));
                     return;
                 }
@@ -1359,22 +1383,19 @@ namespace onitor.Classes
                     if (mode == WebGpuMode.AutoCpu)
                     {
                         AppendWebGpuStatus(kind == "fallback"
-                            ? "SwiftShader WebGPU ACTIVE (gen6 compute-safe default: WebGPU compute/render on CPU, WebGL/compositing still on the console GPU - the hardware D3D12 rung kills compute pipelines at the driver level, see 2026-10-03 sessions)."
+                            ? "SwiftShader WebGPU ACTIVE (gen7 compute-safe default: WebGPU - INCLUDING compute/mapAsync - runs on CPU, while WebGL and compositing stay on the console GPU through ANGLE D3D11. The D3D12 rung is the only Xbox alternative and it cannot execute a single compute dispatch.)"
                             : "auto-cpu mode still has no adapter - check browser-flags.txt and chromium.log.");
                     }
                     else
                     {
-                        // v1.6.1.0: be explicit about the two pins that are
-                        // known to be SwiftShader traps on Xbox - they are
-                        // kept for diagnostics only (gen5 notes above).
                         string pinHint = string.Empty;
                         if (mode == WebGpuMode.PinnedD3D11)
                         {
-                            pinHint = " (known trap on Xbox: console D3D11 is the D3D11On12 layer - Dawn D3D11 cannot create a device on it; diagnostics only)";
+                            pinHint = " (verified trap on Xbox, re-tested 2026-10-03 against a working probe: console D3D11 is the D3D11On12 layer and Dawn's D3D11 backend cannot create a device on it - verdict falls straight through to SwiftShader; diagnostics only)";
                         }
                         else if (mode == WebGpuMode.PinnedD3D12)
                         {
-                            pinHint = " (hardware render works, but ANY WebGPU compute pipeline poisons the console's paravirtualized D3D12 driver - compute sites crash; gen6 defaults to the swiftshader rung for this reason)";
+                            pinHint = " (rendering works, but the first WebGPU compute dispatch returns DXGI_ERROR_DRIVER_INTERNAL_ERROR and removes the device adapter-wide - ANGLE's D3D11 device dies with it, so WebGL breaks too; gen7 defaults to the SwiftShader rung for this reason)";
                         }
                         else if (mode == WebGpuMode.PinnedGles)
                         {
