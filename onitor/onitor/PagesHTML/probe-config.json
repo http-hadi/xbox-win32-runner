@@ -14,7 +14,7 @@
   ],
   "haltOnFault": true,
   "settleMs": 800,
-  "runOnFallback": false,
+  "runOnFallback": true,
   "beaconTopic": "onitor-probe-k3v9xqz7",
-  "note": "v6 RE-ARMED: hardware-only root-cause + fix verification run. runOnFallback=false so a SwiftShader session aborts instead of masking the result."
+  "note": "v7 gen7 end-to-end verification (1.6.5.0): runOnFallback=true so the compute ladder runs on the SwiftShader rung the app now defaults to, proving WebGPU compute + mapAsync PASS on the shipped build. The D3D12 'microsoft' adapter is now classified as a fallback, so the crashing ladder is never run on the adapter that kills the GPU."
 }
