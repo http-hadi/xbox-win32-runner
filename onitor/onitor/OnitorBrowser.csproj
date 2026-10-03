@@ -262,6 +262,8 @@
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </Content>
     <Content Include="PagesHTML\Home.html" />
+    <Content Include="PagesHTML\ComputeProbe.js" />
+    <Content Include="PagesHTML\probe-config.json" />
     <Content Include="PagesHTML\NoInternet.html" />
     <Content Include="PagesHTML\NotFound.html" />
     <Content Include="PagesHTML\script.js" />
