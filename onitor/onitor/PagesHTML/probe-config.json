@@ -1,6 +1,6 @@
 {
-  "enabled": true,
-  "version": 4,
+  "enabled": false,
+  "version": 5,
   "stages": [
     "none",
     "psolive",
@@ -18,5 +18,5 @@
   "settleMs": 1500,
   "runOnFallback": true,
   "beaconTopic": "onitor-probe-k3v9xqz7",
-  "note": "v4 gen6 verification: runOnFallback=true so the ladder ALSO runs on the new swiftshader default (auto-cpu) and proves webgpucheck compute PASS end to end; hardware sessions unchanged. After verification this flips to enabled=false (v5)."
+  "note": "v5 STAND-DOWN: gen6 fix verified on console 2026-10-03 (webgpucheck CHECK_PASSED [25,90,201,0.5] on the auto-cpu swiftshader default). Probe disabled for production; flip enabled=true + runOnFallback as needed for future driver-debug sessions."
 }
