@@ -415,6 +415,7 @@ namespace onitor.Classes
         private const string FlagsOverrideFileName = "browser-flags.txt";
         private const string ModeFileName = "webgpu-mode.txt";
         private const string StatusFileName = "webgpu-status.txt";
+        private const string HwComputeModeFileName = "hwcompute-mode.txt";
 
         // Records which ladder generation ran last. Bump the value whenever
         // the rung set or startup behaviour changes - consoles coming from
@@ -848,6 +849,90 @@ namespace onitor.Classes
             return WebGpuMode.FreshAuto;
         }
 
+        /// <summary>
+        /// Reads a text file shipped inside the app package (ms-appx:///...).
+        /// Used to inject the hardware-compute engine and the WebGPU shim.
+        /// </summary>
+        private static async Task<string> ReadPackageTextAsync(string relativePath)
+        {
+            Windows.Storage.StorageFile file =
+                await Windows.Storage.StorageFile.GetFileFromApplicationUriAsync(
+                    new Uri("ms-appx:///" + relativePath));
+            return await Windows.Storage.FileIO.ReadTextAsync(file);
+        }
+
+        /// <summary>
+        /// Hardware-compute shim decision (v1.6.6.0).
+        ///
+        /// WebGPU cannot execute a compute dispatch on this console: the D3D12
+        /// device is created, the compute PSO is created and the command buffer
+        /// SUBMITS successfully, and then the GPU process dies ~22 ms later when
+        /// the driver runs the work (DXGI_ERROR_DRIVER_INTERNAL_ERROR /
+        /// exit_code=34), removing the device adapter-wide and taking ANGLE's
+        /// D3D11 device - and therefore WebGL - down with it. See
+        /// WEBGPU-XBOX-NOTES.md for the raw breadcrumbs.
+        ///
+        /// So compute is routed onto the console GPU through the stack that does
+        /// work (ANGLE -> D3D11 -> D3D11On12) by the WebGL2 engine in
+        /// hwcompute.js, and wgpu-shim.js presents that as navigator.gpu.
+        ///
+        /// allowDelegation hands anything the shim cannot translate to the
+        /// NATIVE WebGPU device. That is only safe while the native rung is the
+        /// software one; on the D3D12 rung the native path is exactly what
+        /// faults the GPU process. With delegation on, no page is made worse off
+        /// than it is today: supported kernels go to the GPU, everything else
+        /// (including WebGPU rendering) falls through to native behaviour.
+        ///
+        /// Control via &lt;LocalState&gt;\hwcompute-mode.txt:
+        ///   "off"        - do not install the shim at all
+        ///   "nodelegate" - install, but throw loudly on unsupported shaders
+        ///   anything else / missing - install (default)
+        /// </summary>
+        private static bool HwComputeEnabled(out bool allowDelegation)
+        {
+            allowDelegation = false;
+            try
+            {
+                if (!IsXboxDevice()) return false;
+
+                string choice = null;
+                try
+                {
+                    string path = LocalStatePath(HwComputeModeFileName);
+                    if (System.IO.File.Exists(path))
+                    {
+                        choice = System.IO.File.ReadAllText(path).Trim().ToLowerInvariant();
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine("[Onitor] Could not read " + HwComputeModeFileName + ": " + ex.Message);
+                }
+
+                if (choice == "off" || choice == "0" || choice == "false" || choice == "disabled")
+                {
+                    return false;
+                }
+
+                if (choice == "nodelegate" || choice == "no-delegate")
+                {
+                    allowDelegation = false;
+                    return true;
+                }
+
+                WebGpuMode mode = ReadWebGpuMode();
+                if (mode == WebGpuMode.FreshAuto) mode = WebGpuMode.AutoCpu;
+                allowDelegation =
+                    mode != WebGpuMode.AutoD3D12 && mode != WebGpuMode.PinnedD3D12;
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine("[Onitor] HwComputeEnabled failed: " + ex.Message);
+                return false;
+            }
+        }
+
         private static bool LadderGenerationIsCurrent()
         {
             try
@@ -984,6 +1069,43 @@ namespace onitor.Classes
                 catch (Exception ex)
                 {
                     Debug.WriteLine("[Onitor] Could not install WebGPU badge script: " + ex.Message);
+                }
+
+                // Hardware compute shim (v1.6.6.0). Registered per tab BEFORE
+                // any page script runs, exactly like the badge, so
+                // navigator.gpu is already the shim by the time a page looks at
+                // it. Everything is wrapped: a failure here must never stop the
+                // engine from loading. See HwComputeEnabled for the policy.
+                try
+                {
+                    bool allowDelegate;
+                    if (HwComputeEnabled(out allowDelegate))
+                    {
+                        string engine = await ReadPackageTextAsync("PagesHTML/hwcompute.js");
+                        string shim = await ReadPackageTextAsync("PagesHTML/wgpu-shim.js");
+                        if (!string.IsNullOrEmpty(engine) && !string.IsNullOrEmpty(shim))
+                        {
+                            string bootstrap =
+                                engine + "\n" + shim + "\n" +
+                                "(function(){try{WgpuShim.install({force:true,delegateUnsupported:" +
+                                (allowDelegate ? "true" : "false") +
+                                "});}catch(e){try{console.log('ONITOR hwcompute shim install failed: '+" +
+                                "(e&&e.message?e.message:e));}catch(x){}}})();";
+                            await _core.AddScriptToExecuteOnDocumentCreatedAsync(bootstrap);
+                            AppendWebGpuStatus(
+                                "hardware compute shim INSTALLED (WebGL2/ANGLE-D3D11 engine on the console GPU; " +
+                                "delegation to native WebGPU=" + (allowDelegate ? "on" : "OFF - native rung faults on compute") +
+                                "). Disable with hwcompute-mode.txt=off");
+                        }
+                        else
+                        {
+                            AppendWebGpuStatus("hardware compute shim NOT installed - package files missing.");
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine("[Onitor] Could not install hardware compute shim: " + ex.Message);
                 }
 
                 ApplySettings();

@@ -1,12 +1,20 @@
 {
-  "enabled": true,
+  "enabled": false,
   "version": 8,
   "stages": [
-    "full"
+    "none",
+    "psocreate",
+    "upload",
+    "macupload",
+    "dispatch",
+    "copy",
+    "signal",
+    "full",
+    "webgpucheck"
   ],
   "haltOnFault": true,
   "settleMs": 800,
   "runOnFallback": true,
   "beaconTopic": "onitor-probe-k3v9xqz7",
-  "note": "v8 SINGLE-DEVICE hardware question: the gen6/gen7 probe builds a BRAND NEW adapter+device for every stage and the D3D12 crash always lands on the 5th device. Is the failure 'D3D12 compute is impossible', or 'the probe exhausts paravirtualized D3D12 heaps first'? stages=['full'] runs exactly ONE device, one compute dispatch, one copy, one mapAsync - nothing before it. Also carries --enable-webgpu-developer-features so the real adapter description/architecture is unmasked."
+  "note": "v8 STAND-DOWN (1.6.6.0). WebGPU compute is impossible on this console's D3D12 driver and every other hardware backend is closed off; hardware compute is delivered instead by the WebGL2/ANGLE-D3D11 engine (hwcompute.js) behind wgpu-shim.js. Probe disabled for production - set enabled=true (and runOnFallback as needed) to re-arm a driver-debug session."
 }

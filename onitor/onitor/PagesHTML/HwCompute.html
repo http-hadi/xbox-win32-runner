@@ -1,0 +1,116 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Hardware GPU Compute</title>
+<style>
+  html, body { margin: 0; background: #0e1116; color: #cfd8dc;
+    font: 13px/1.5 Consolas, "Courier New", monospace; }
+  .wrap { max-width: 900px; margin: 0 auto; padding: 18px 20px 40px; }
+  h1 { font-size: 17px; color: #7ec8ff; margin: 0 0 2px; }
+  .sub { color: #78909c; font-size: 11px; margin-bottom: 14px; }
+  .card { border: 1px solid #37474f; border-radius: 8px; padding: 12px 14px;
+    margin-bottom: 12px; background: rgba(20,24,30,.7); }
+  .pill { display: inline-block; padding: 2px 9px; border-radius: 9px;
+    font-weight: 700; font-size: 11px; }
+  .ok { background: #14361f; color: #34d27b; border: 1px solid #34d27b; }
+  .bad { background: #3a1a1a; color: #ff6b6b; border: 1px solid #ff6b6b; }
+  .warn { background: #3a3218; color: #f5b93d; border: 1px solid #f5b93d; }
+  table { border-collapse: collapse; width: 100%; }
+  td { padding: 3px 8px 3px 0; vertical-align: top; }
+  td.k { color: #78909c; white-space: nowrap; width: 190px; }
+  pre { white-space: pre-wrap; word-break: break-word; margin: 6px 0 0; }
+  button { background: #1b2733; color: #cfd8dc; border: 1px solid #37474f;
+    border-radius: 6px; padding: 6px 14px; font: inherit; cursor: pointer; }
+  button:hover { border-color: #7ec8ff; color: #fff; }
+  .note { color: #78909c; font-size: 11px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Hardware GPU Compute</h1>
+  <div class="sub">Runs general-purpose compute on the console GPU through ANGLE / D3D11 &mdash; the graphics stack that works on Xbox.</div>
+
+  <div class="card">
+    <div id="verdict"><span class="pill warn">running&hellip;</span></div>
+    <pre id="detail"></pre>
+  </div>
+
+  <div class="card">
+    <table id="tbl"></table>
+  </div>
+
+  <div class="card">
+    <button id="again">Run again</button>
+    <div class="note" style="margin-top:8px">
+      Why this exists: WebGPU cannot execute a compute dispatch on this console.
+      The D3D12 device is created, the compute pipeline is created, the command
+      buffer is submitted, and the GPU process then dies with
+      <code>DXGI_ERROR_DRIVER_INTERNAL_ERROR (0x887A0020)</code> /
+      <code>exit_code=34</code>, taking WebGL down with it. Dawn's D3D11 backend
+      yields no device and the OpenGLES backend is compiled out of the win-UWP
+      runtime. The console GPU itself is fine &mdash; this page drives it.
+    </div>
+  </div>
+</div>
+
+<script src="hwcompute.js"></script>
+<script>
+(function () {
+  "use strict";
+  var verdict = document.getElementById("verdict");
+  var detail = document.getElementById("detail");
+  var tbl = document.getElementById("tbl");
+
+  function rows(pairs) {
+    var html = "";
+    for (var i = 0; i < pairs.length; i++) {
+      var v = pairs[i][1];
+      if (v === undefined || v === null) v = "\u2014";
+      html += "<tr><td class='k'>" + pairs[i][0] + "</td><td>" + String(v) + "</td></tr>";
+    }
+    tbl.innerHTML = html;
+  }
+
+  function run() {
+    verdict.innerHTML = "<span class='pill warn'>running\u2026</span>";
+    detail.textContent = "";
+    tbl.innerHTML = "";
+    // yield so the "running" state paints before the GPU blocks the thread
+    setTimeout(function () {
+      var r;
+      try {
+        r = HWCompute.selfTest(1048576);
+      } catch (e) {
+        r = { ok: false, error: String((e && e.message) || e) };
+      }
+
+      if (r.ok) {
+        verdict.innerHTML = "<span class='pill ok'>COMPUTE PASSED ON " +
+          (r.isHardware ? "HARDWARE GPU" : "SOFTWARE RENDERER") + "</span>";
+      } else {
+        verdict.innerHTML = "<span class='pill bad'>FAILED</span>";
+      }
+      detail.textContent = r.error ? ("error: " + r.error) : "";
+
+      rows([
+        ["WebGL renderer", r.renderer],
+        ["Vendor", r.vendor],
+        ["Hardware accelerated", r.isHardware ? "yes" : "no (software renderer)"],
+        ["Float render targets", r.floatRenderable ? "EXT_color_buffer_float present" : "MISSING"],
+        ["GL version", r.glVersion],
+        ["Elements verified", r.count],
+        ["Kernel out[i]=a[i]*2+1", r.correct ? "all " + r.count + " values correct" : ("MISMATCH at index " + r.firstBad)],
+        ["1M-element pass", (r.msScale2p1 ? r.msScale2p1 + " ms" : "\u2014")],
+        ["20 transcendental passes", (r.msTranscendentals ? r.msTranscendentals + " ms" : "\u2014")],
+        ["Approx throughput", (r.mflops ? r.mflops + " MFLOP/s" : "n/a (virtual-time run)")]
+      ]);
+    }, 60);
+  }
+
+  document.getElementById("again").addEventListener("click", run);
+  run();
+})();
+</script>
+</body>
+</html>

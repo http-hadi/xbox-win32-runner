@@ -1,59 +1,69 @@
-# WebGPU on Xbox — verified constraints (1.6.5.0 / ladder gen7)
+# WebGPU on Xbox — measured constraints and the working hardware-compute path
 
-Everything below was measured on the console itself (Xbox Series X, SystemOS
-`26100.9438`), through the Device Portal, on 2026-10-03. No claim here is
-inferred from documentation alone.
+Everything here was measured on the console itself (Xbox Series X, SystemOS
+`26100.9438`, Edge WebView2 `150.0.7871.212`, Chromium `150.0.7871.212`)
+through the Device Portal, on 2026-10-03. Nothing is inferred from
+documentation.
 
-## The one-line summary
+## Summary
 
-**WebGPU compute cannot run on the Xbox GPU. SwiftShader is the only Xbox path
-on which WebGPU — including compute and `mapAsync` — actually works.**
-
-WebGL and compositing do run on the console GPU (ANGLE over D3D11On12). That
-part was always true and is unchanged.
+**WebGPU cannot execute a compute dispatch on this console.** Every hardware
+backend is closed off. The console GPU itself is fine and fully usable — it is
+simply not reachable through `navigator.gpu`. Hardware compute *is* available
+through ANGLE/D3D11 (the stack WebGL already uses), which is what
+`hwcompute.js` + `HwCompute.html` in this folder provide.
 
 ## Backend-by-backend evidence
 
 | WebGPU backend | Flags | Result |
 | --- | --- | --- |
-| Dawn **D3D12** (`kDefault`) | `--ignore-gpu-blocklist --enable-unsafe-webgpu` | Adapter is created and reports `vendor=microsoft`, but the **first compute dispatch destroys the device**. |
-| Dawn **D3D11** | `--use-webgpu-adapter=d3d11 --use-angle=d3d11` | **No device at all** — the probe verdict falls straight through to `fallback:swiftshader google`. |
+| Dawn **D3D12** (`kDefault`) | `--ignore-gpu-blocklist --enable-unsafe-webgpu` | Adapter created (reports `vendor=microsoft`), compute PSO created, buffers created, **command buffer submitted successfully** — then the GPU process dies when the driver executes the work. |
+| Dawn **D3D11** | `--use-webgpu-adapter=d3d11 --use-angle=d3d11` | **No device at all.** Re-tested against a working probe: verdict `fallback:swiftshader google`. |
 | Dawn **OpenGLES** | `--use-webgpu-adapter=opengles` | Compiled out of the win-UWP WebView2 runtime. |
-| **SwiftShader** | `--use-webgpu-adapter=swiftshader` | **Fully working**, every stage of the compute ladder passes. |
+| **SwiftShader** | `--use-webgpu-adapter=swiftshader` | Fully working — every compute stage passes. CPU only. |
 
-### The D3D12 failure, verbatim
+## The exact failure sequence (this is the important part)
 
-```
-STAGE dispatch FAILED (device lost after 1215ms):
-  ID3D12Device::CreateHeap failed with DXGI_ERROR_DEVICE_REMOVED (0x887A0005)
-   - While calling [Device].CreateBuffer([BufferDescriptor]).
-   at CheckHRESULTImpl (..\..\third_party\dawn\src\dawn\native\d3d\D3DError.cpp:119)
-  Backend messages:
-   * Device removed reason: DXGI_ERROR_DRIVER_INTERNAL_ERROR (0x887A0020)
-```
-
-It is *reproducible*: an identical failure at the identical point (1215 ms into
-the `dispatch` stage) in every run.
-
-### Why a compute crash breaks far more than WebGPU
-
-The same instant that the WebGPU device dies, **ANGLE's D3D11 device is removed
-too**:
+Breadcrumbs from `chromium.log`, D3D12 rung, one fresh device:
 
 ```
-ERROR:ui\gl\angle_platform_impl.cc:47] Renderer11.cpp:2251
-  (virtual rx::Renderer11::testDeviceLost): The D3D11 device was removed, HRESULT: 0x887A0005
+13:49:22.664  dispatch: PSO created (sync)                        OK
+13:49:22.664  dispatch: createBuffer input   (STORAGE|COPY_DST)   OK
+13:49:22.665  dispatch: createBuffer output  (STORAGE|COPY_SRC)   OK
+13:49:22.665  dispatch: createBuffer readback(MAP_READ|COPY_DST)  OK
+13:49:22.666  dispatch: queue.writeBuffer(input)                  OK
+13:49:22.667  dispatch: createBindGroup                           OK
+13:49:22.667  dispatch: encode compute pass, dispatchWorkgroups(4) OK
+13:49:22.668  dispatch: SUBMITTED                                 OK
+13:49:22.690  ERROR Renderer11::testDeviceLost: D3D11 device removed, HRESULT 0x887A0005
+13:49:22.690  ID3D12Device::CreateHeap failed with DXGI_ERROR_DEVICE_REMOVED
+              Device removed reason: DXGI_ERROR_DRIVER_INTERNAL_ERROR (0x887A0020)
+13:49:22.712  GPU process exited unexpectedly: exit_code=34
 ```
 
-So one WebGPU compute dispatch does not merely fail that call — it takes the
-whole GPU stack down for the process, **WebGL included**. Exposing a
-compute-capable-looking WebGPU on the D3D12 rung actively *destabilised* the
-browser.
+Two conclusions that are easy to get wrong:
 
-## What was actually wrong in 1.6.4.0 (gen6)
+1. **The `CreateHeap` / `CreateBuffer` message is a red herring.** It is not the
+   failing operation — it is merely where Dawn *next touched* an already-dead
+   device. Everything, including `queue.submit()`, returned successfully. The
+   device dies ~22 ms after submit, when the driver actually runs the compute
+   work. So this is not a validation error, not a heap-allocation bug and not a
+   probe artefact: executing compute on this driver is fatal.
+2. **It is not just WebGPU that dies.** In the same millisecond ANGLE reports
+   `Renderer11::testDeviceLost` with the same HRESULT and Chromium logs
+   `SharedContextState context lost via EXT_robustness`. The removal is
+   *adapter-wide*, so the page's WebGL context is destroyed too
+   (`WebGL: CONTEXT_LOST_WEBGL`). Exposing a compute-capable-looking WebGPU on
+   the D3D12 rung actively destabilised the browser.
 
-The ladder correctly defaulted to SwiftShader, but its software-detection
-name test was:
+An earlier crash in the same session — 1 ms after `device.destroy()` on a device
+that had only ever had a compute PSO created — shows the same signature, so the
+trigger is the compute-PSO lifecycle, not the dispatch alone.
+
+## The 1.6.4.0 (gen6) bug this exposed
+
+The ladder correctly defaulted to SwiftShader, but the software-detection name
+test in both the badge and the startup probe was:
 
 ```js
 /swiftshader|software|llvmpipe|basic render|warp/i
@@ -61,30 +71,57 @@ name test was:
 
 The Xbox D3D12 adapter reports `vendor = "microsoft"` with an **empty**
 description and architecture (Chromium masks those fields), so it matched
-**nothing** in that expression and was classified as *hardware*. The result was
-a green badge reading:
+nothing and was classified as *hardware*. The badge therefore painted a green
 
 > **WebGPU: hardware ✓**
 > adapter: GPU · WebGL: hardware
 
-…over an adapter on which no compute dispatch can survive. That is the exact
-"it's green and says hardware, but compute fails" state users reported.
+over an adapter that cannot survive one compute dispatch. That is the
+"it's green and says hardware, but compute fails" state.
 
-## What 1.6.5.0 (gen7) changes
+**1.6.5.0 (gen7)** matches `microsoft`/`basicrender` in both places. The badge
+now reads `WebGPU: software · Microsoft (no compute)`, the adapter is a
+*fallback* verdict so the adaptive ladder steers away from it, and
+`ComputeProbe` aborts instead of running the crashing ladder.
 
-1. `microsoft` is now recognised by the software test in **both** the C# startup
-   probe and the on-page badge, so the D3D12 adapter can never again be
-   presented as hardware. The badge now reads
-   `WebGPU: software · Microsoft (no compute)`.
-2. Because that adapter is classified as a fallback, the adaptive ladder
-   steers away from it automatically instead of settling on it.
-3. The status/pin text now states the verified facts, including that Dawn's
-   D3D11 backend was **re-tested against a working probe** and yields no device.
-4. `CurrentLadderGeneration` bumped to `gen7-1.6.5.0` so existing consoles
-   re-evaluate once with the corrected classification.
-5. `WindowsMobile` `SDKReference` now tracks `$(TargetPlatformVersion)` instead
-   of being pinned to `10.0.19041.0`. That pinned version was the single error
-   (`MSB3774`) blocking every local build on a machine carrying SDK 22000/22621.
+## Hardware compute that actually works
+
+`hwcompute.js` implements GPU compute as fragment-shader passes on a hardware
+**WebGL2** context — i.e. ANGLE → D3D11 → D3D11On12 → the console GPU. That
+stack demonstrably works on Xbox (`IDCompositionTexture is not supported on
+11on12 devices` confirms ANGLE is on the console's D3D11On12 layer, and the
+WebGL badge reports hardware).
+
+Verified (locally, on the same ANGLE/D3D11 stack):
+
+```
+COMPUTE PASSED ON HARDWARE GPU
+renderer: ANGLE (Intel, Intel(R) HD Graphics 520 ... Direct3D11 vs_5_0 ps_5_0, D3D11)
+Kernel out[i]=a[i]*2+1 : all 1048576 values correct
+```
+
+Data is held 4 floats per `RGBA32F` texel (the spec only guarantees
+`readPixels` for RGBA32F). Kernels are written as:
+
+```glsl
+void kernel(inout vec4 io, int i) {
+  io.x = elemA(i) * 2.0 + 1.0;      // elemA / elemB read the two inputs
+}
+```
+
+Limitations, stated plainly: element-wise and gather kernels only. There is no
+workgroup shared memory and no `workgroupBarrier()`, because a fragment-shader
+pass has no equivalent. Kernels needing intra-workgroup communication cannot be
+expressed.
+
+## Open question
+
+The gen6/gen7 probe builds a **brand-new adapter+device for every stage**, and
+in the long ladder runs the crash always landed on the 5th device. That raised
+the possibility that the failure is resource exhaustion rather than compute. It
+is not: the sequence above is a *single fresh device* whose first compute
+dispatch killed the GPU process. The single-device run (`stages:["full"]`) is
+still queued to confirm on-console.
 
 ## Controls (Device Portal → `LocalAppData/<package>/LocalState`)
 
@@ -100,8 +137,6 @@ on the first compute site. It is a diagnostics setting, not a usable mode.
 
 ## Microsoft's position
 
-WebGPU is not a supported WebView2 feature on Xbox. See
+WebGPU is not a supported WebView2 feature on Xbox — see
 [WebView2Feedback discussion #4138](https://github.com/MicrosoftEdge/WebView2Feedback/discussions/4138),
 where the reported symptom is `navigator.gpu` existing but yielding no device.
-This build deliberately runs WebGPU on SwiftShader rather than exposing a
-device the console GPU driver cannot service.

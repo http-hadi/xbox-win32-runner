@@ -264,6 +264,9 @@
     <Content Include="PagesHTML\Home.html" />
     <Content Include="PagesHTML\ComputeProbe.js" />
     <Content Include="PagesHTML\probe-config.json" />
+    <Content Include="PagesHTML\hwcompute.js" />
+    <Content Include="PagesHTML\HwCompute.html" />
+    <Content Include="PagesHTML\wgpu-shim.js" />
     <Content Include="PagesHTML\NoInternet.html" />
     <Content Include="PagesHTML\NotFound.html" />
     <Content Include="PagesHTML\script.js" />
