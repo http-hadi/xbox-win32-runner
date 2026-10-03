@@ -1,9 +1,8 @@
 {
   "enabled": true,
-  "version": 2,
+  "version": 3,
   "stages": [
     "none",
-    "modlive",
     "psolive",
     "psocreateasync",
     "psocreate",
@@ -15,8 +14,8 @@
     "full",
     "webgpucheck"
   ],
-  "haltOnFault": true,
-  "settleMs": 800,
+  "haltOnFault": false,
+  "settleMs": 1500,
   "beaconTopic": "onitor-probe-k3v9xqz7",
-  "note": "v1.6.3.0 isolation ladder: modlive(module only) / psolive(PSO no-destroy) / async variant"
+  "note": "v3 no-halt full pass: modlive already proven CLEAN (5s hold, zero poison events). Runner false-faults on self-destroy (reason=destroyed) - ignore those, real poison = DEVICE_LOST with other reasons or requestAdapter-null in later stages"
 }
