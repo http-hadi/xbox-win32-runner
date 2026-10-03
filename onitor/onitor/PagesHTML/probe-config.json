@@ -1,8 +1,11 @@
 {
   "enabled": true,
-  "version": 1,
+  "version": 2,
   "stages": [
     "none",
+    "modlive",
+    "psolive",
+    "psocreateasync",
     "psocreate",
     "upload",
     "macupload",
@@ -15,5 +18,5 @@
   "haltOnFault": true,
   "settleMs": 800,
   "beaconTopic": "onitor-probe-k3v9xqz7",
-  "note": "S3: HLSL 2018 (d3d12_use_hlsl_2021 disabled)"
+  "note": "v1.6.3.0 isolation ladder: modlive(module only) / psolive(PSO no-destroy) / async variant"
 }

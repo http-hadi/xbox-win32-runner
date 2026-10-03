@@ -225,6 +225,48 @@
       await wait(cfg.settleMs);
       return d;
     },
+    async modlive() {
+      var d = await makeDevice("modlive");
+      crumb("modlive: createShaderModule (Tint WGSL->HLSL happens here)");
+      var module = d.device.createShaderModule({ code: PROBE_WGSL });
+      crumb("modlive: createBindGroupLayout + createPipelineLayout (NO pipeline)");
+      var bgl = d.device.createBindGroupLayout({ entries: [
+        { binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: { type: "read-only-storage" } },
+        { binding: 1, visibility: GPUShaderStage.COMPUTE, buffer: { type: "storage" } }
+      ]});
+      var layout = d.device.createPipelineLayout({ bindGroupLayouts: [bgl] });
+      crumb("modlive: module + layouts alive, NO createComputePipeline - holding 5s...");
+      await wait(5000);
+      crumb("modlive: held 5s clean? (any DEVICE_LOST above answers module-vs-PSO) - destroying");
+      d.device.destroy();
+      await wait(2000);
+      crumb("modlive: 2s after destroy");
+      return d;
+    },
+    async psolive() {
+      var d = await makeDevice("psolive");
+      var parts = await buildPipelineParts("psolive", d.device);
+      createPipelineSync("psolive", d.device, parts.layout, parts.module);
+      crumb("psolive: PSO created - keeping device ALIVE 8s, NO destroy (isolation: creation vs teardown poison)");
+      await wait(8000);
+      crumb("psolive: held 8s - destroying now");
+      d.device.destroy();
+      await wait(2000);
+      crumb("psolive: 2s after destroy");
+      return d;
+    },
+    async psocreateasync() {
+      var d = await makeDevice("psocreateasync");
+      var parts = await buildPipelineParts("psocreateasync", d.device);
+      crumb("psocreateasync: createComputePipelineAsync...");
+      var pipeline = await d.device.createComputePipelineAsync({ layout: parts.layout, compute: { module: parts.module, entryPoint: "main" } });
+      crumb("psocreateasync: PSO created (async path) - holding 4s");
+      await wait(4000);
+      d.device.destroy();
+      await wait(2000);
+      crumb("psocreateasync: 2s after destroy");
+      return d;
+    },
     async upload() {
       var d = await makeDevice("upload");
       var bufs = makeBuffers("upload", d.device);
