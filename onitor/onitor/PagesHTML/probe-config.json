@@ -1,9 +1,19 @@
 {
   "enabled": true,
   "version": 1,
-  "stages": ["none", "psocreate", "upload", "macupload", "dispatch", "copy", "signal", "full", "webgpucheck"],
+  "stages": [
+    "none",
+    "psocreate",
+    "upload",
+    "macupload",
+    "dispatch",
+    "copy",
+    "signal",
+    "full",
+    "webgpucheck"
+  ],
   "haltOnFault": true,
   "settleMs": 800,
   "beaconTopic": "onitor-probe-k3v9xqz7",
-  "note": "baseline 1.6.2.0 - full ladder, no toggles"
+  "note": "S2: RS 1.0 (d3d12_use_root_signature_version_1_1 disabled)"
 }
