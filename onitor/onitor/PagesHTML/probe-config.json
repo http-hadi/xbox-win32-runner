@@ -1,6 +1,6 @@
 {
   "enabled": true,
-  "version": 3,
+  "version": 4,
   "stages": [
     "none",
     "psolive",
@@ -16,6 +16,7 @@
   ],
   "haltOnFault": false,
   "settleMs": 1500,
+  "runOnFallback": true,
   "beaconTopic": "onitor-probe-k3v9xqz7",
-  "note": "v3 no-halt full pass: modlive already proven CLEAN (5s hold, zero poison events). Runner false-faults on self-destroy (reason=destroyed) - ignore those, real poison = DEVICE_LOST with other reasons or requestAdapter-null in later stages"
+  "note": "v4 gen6 verification: runOnFallback=true so the ladder ALSO runs on the new swiftshader default (auto-cpu) and proves webgpucheck compute PASS end to end; hardware sessions unchanged. After verification this flips to enabled=false (v5)."
 }

@@ -145,8 +145,11 @@
       " architecture=" + (info.architecture || "?") +
       " description=" + (info.description || "?"));
     var vendorish = String(info.vendor || "") + " " + String(info.description || "");
-    if (vendorish.toLowerCase().indexOf("swiftshader") !== -1) {
+    if (vendorish.toLowerCase().indexOf("swiftshader") !== -1 && cfg.runOnFallback !== true) {
       throw new Error("RUN INVALID: adapter is SwiftShader (software) - expected the hardware adapter");
+    }
+    if (vendorish.toLowerCase().indexOf("swiftshader") !== -1 && cfg.runOnFallback === true) {
+      crumb(stage + ": swiftshader adapter ACCEPTED (cfg.runOnFallback=true - gen6 swiftshader verification run)");
     }
     crumb(stage + ": requestDevice...");
     var device = await adapter.requestDevice();
@@ -540,11 +543,20 @@
       crumb("hardware adapter confirmed by the app probe - starting compute ladder in 2s");
       await wait(2000);
     } else if (verdict && (verdict.indexOf("fallback:") === 0 || verdict === "null" || verdict === "none" || verdict === "error")) {
-      var why = "startup probe verdict '" + verdict + "' - not a hardware session, compute probe ABORTED (ladder would restart the app)";
-      crumb(why);
-      setBanner("aborted: not a hardware session", "#ffb300");
-      beacon("ABORT " + why);
-      return;
+      if (cfg.runOnFallback === true && verdict.indexOf("fallback:") === 0) {
+        /* gen6 (v1.6.4.0): the app's compute-safe default IS the swiftshader
+           rung, so software sessions are now first-class verification
+           targets. Run the ladder and let the stages prove compute PASS. */
+        crumb("software session but cfg.runOnFallback=true - starting compute ladder on the swiftshader adapter (gen6 verification)");
+        setBanner("swiftshader verification run\u2026", "#80d8ff");
+        await wait(2000);
+      } else {
+        var why = "startup probe verdict '" + verdict + "' - not a hardware session, compute probe ABORTED (ladder would restart the app)";
+        crumb(why);
+        setBanner("aborted: not a hardware session", "#ffb300");
+        beacon("ABORT " + why);
+        return;
+      }
     } else {
       /* no/late verdict: the app poller's window is over either way (30s > its
          2.5s + 18x600ms). Proceeding cannot corrupt the ladder. */

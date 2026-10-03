@@ -379,8 +379,9 @@ namespace onitor.Classes
         private const string BaseGpuFeatureBrowserArguments =
             "--enable-unsafe-webgpu --enable-features=WebGPU,msWebNN,WebNNAPI";
 
-        // Rung 1 (v1.6.0.0): kDefault -> Dawn D3D12, the console's native GPU
-        // API. No --use-webgpu-adapter switch at all - that is the point:
+        // Hardware rung (gen6: pin-only, no longer the ladder start).
+        // kDefault -> Dawn D3D12, the console's native GPU API. No
+        // --use-webgpu-adapter switch at all - that is the point:
         // ParseWebGPUAdapterName maps "" / absent to kDefault and Windows
         // kDefault selects backend_types={D3D12} (webgpu_decoder_impl.cc
         // ~1773). Paired with --ignore-gpu-blocklist + --enable-unsafe-webgpu
@@ -427,7 +428,7 @@ namespace onitor.Classes
         // both intermediate rungs only ever burned two restarts on the way
         // to the same SwiftShader result. Pinned values survive as before.
         private const string LadderGenFileName = "webgpu-ladder-gen.txt";
-        private const string CurrentLadderGeneration = "gen5-1.6.1.0";
+        private const string CurrentLadderGeneration = "gen6-1.6.4.0";
 
         /// <summary>
         /// Persisted WebGPU strategy (webgpu-mode.txt). "auto-*" values are
@@ -668,15 +669,30 @@ namespace onitor.Classes
                 WebGpuMode mode = ReadWebGpuMode();
                 if (mode == WebGpuMode.FreshAuto)
                 {
-                    // Fresh ladder (v1.6.0.0): start at rung 1, kDefault /
-                    // Dawn D3D12 - the console's native GPU API, with the
-                    // browser-side blocklist bypass preventing the unknown-GPU
-                    // software marking (and thus the forced SwiftShader
-                    // fallback) from ever engaging. D3D11/D3D12 never
-                    // actually ran with a working probe on gen2/gen3
-                    // consoles, so they are first-class rungs again.
-                    mode = WebGpuMode.AutoD3D12;
-                    TrySetWebGpuMode("auto-d3d12");
+                    // Fresh ladder (v1.6.4.0, gen6): START at the SwiftShader
+                    // rung. 2026-10-03 console evidence (probe sessions
+                    // S2-S11 on build 1.6.3.0): the console's
+                    // paravirtualized D3D12 driver turns EVERY compute-PSO
+                    // lifecycle (create -> deferred release) into an
+                    // adapter-wide DEVICE_REMOVED (0x887A0005, GPU process
+                    // exit 34) roughly 1-2ms after the first deferred
+                    // release - DXBC /O0, /O1, skip-opt, DXIL via DXC, blob
+                    // cache on/off, root-signature 1.0/1.1 and HLSL
+                    // 2018/2021 ALL died identically, so no browser-side
+                    // flag set can keep hardware D3D12 WebGPU compute
+                    // alive; the D3D11 and GLES WebGPU backends do not
+                    // yield a device in the win-UWP runtime (both end on
+                    // SwiftShader). Hardware WebGPU RENDERING works, but any
+                    // compute pipeline poisons the adapter for every
+                    // following D3D12 call - WebGPU sites (webgpucheck.com
+                    // etc.) are broken on hardware. SwiftShader keeps WebGPU
+                    // fully functional INCLUDING compute, while WebGL and
+                    // compositing stay on the console GPU via ANGLE d3d11.
+                    // Users who prefer hardware render-only WebGPU can pin
+                    // "d3d12" in webgpu-mode.txt (the settle message then
+                    // carries the compute warning).
+                    mode = WebGpuMode.AutoCpu;
+                    TrySetWebGpuMode("auto-cpu");
                 }
 
                 if (mode == WebGpuMode.AutoCpu)
@@ -762,16 +778,15 @@ namespace onitor.Classes
                 if (mode == WebGpuMode.AutoCpu || mode == WebGpuMode.AutoD3D11 ||
                     mode == WebGpuMode.AutoD3D12 || mode == WebGpuMode.AutoGles)
                 {
-                    // Previous generation in ANY auto state - settled on
-                    // SwiftShader (gen3 auto-cpu), stopped at GLES (gen3), or
-                    // frozen mid-ladder by the broken v1.5.0.0 probe ("probe
-                    // result={}" matched no branch, gen2) - restarts at rung 1
-                    // (auto-d3d12). The gen2/gen3 d3d11/d3d12 rungs never ran
-                    // with a working probe, and v1.6.0.0 pairs them with the
-                    // browser-side blocklist bypass, so they are worth a fresh
-                    // attempt; user pins always survive below.
-                    mode = WebGpuMode.AutoD3D12;
-                    TrySetWebGpuMode("auto-d3d12");
+                    // Previous generation in ANY auto state - re-enter the
+                    // gen6 ladder at its new rung 1, the compute-safe
+                    // SwiftShader rung (v1.6.4.0: hardware D3D12 WebGPU
+                    // renders, but ANY compute pipeline poisons the console's
+                    // paravirtualized D3D12 driver - full evidence in the
+                    // ComputeBrowserArguments gen6 notes). User pins always
+                    // survive below.
+                    mode = WebGpuMode.AutoCpu;
+                    TrySetWebGpuMode("auto-cpu");
                 }
                 else if (mode != WebGpuMode.PinnedD3D11 &&
                          mode != WebGpuMode.PinnedD3D12 &&
@@ -1287,7 +1302,7 @@ namespace onitor.Classes
                 catch (Exception) { }
 
                 WebGpuMode mode = ReadWebGpuMode();
-                if (mode == WebGpuMode.FreshAuto) mode = WebGpuMode.AutoD3D12; // fresh starts at rung 1 (v1.6.0.0)
+                if (mode == WebGpuMode.FreshAuto) mode = WebGpuMode.AutoCpu; // fresh starts at rung 1 = compute-safe SwiftShader (gen6, v1.6.4.0)
                 bool isXbox = IsXboxDevice();
 
                 Debug.WriteLine("[Onitor] WebGPU probe: " + kind + " ('" + desc + "') mode=" + ModeName(mode));
@@ -1297,7 +1312,10 @@ namespace onitor.Classes
 
                 if (kind == "gpu")
                 {
-                    AppendWebGpuStatus("Hardware WebGPU adapter ACTIVE ('" + desc + "') - running on the console GPU.");
+                    AppendWebGpuStatus("Hardware WebGPU adapter ACTIVE ('" + desc + "')" +
+                        (mode == WebGpuMode.PinnedD3D12
+                            ? " - WARNING (d3d12 pin): rendering works but ANY compute pipeline kills the adapter at the driver level (gen6 evidence 2026-10-03); compute sites will crash."
+                            : " - running on the console GPU."));
                     return;
                 }
 
@@ -1341,7 +1359,7 @@ namespace onitor.Classes
                     if (mode == WebGpuMode.AutoCpu)
                     {
                         AppendWebGpuStatus(kind == "fallback"
-                            ? "SwiftShader software adapter active (expected in auto-cpu mode)."
+                            ? "SwiftShader WebGPU ACTIVE (gen6 compute-safe default: WebGPU compute/render on CPU, WebGL/compositing still on the console GPU - the hardware D3D12 rung kills compute pipelines at the driver level, see 2026-10-03 sessions)."
                             : "auto-cpu mode still has no adapter - check browser-flags.txt and chromium.log.");
                     }
                     else
@@ -1353,6 +1371,10 @@ namespace onitor.Classes
                         if (mode == WebGpuMode.PinnedD3D11)
                         {
                             pinHint = " (known trap on Xbox: console D3D11 is the D3D11On12 layer - Dawn D3D11 cannot create a device on it; diagnostics only)";
+                        }
+                        else if (mode == WebGpuMode.PinnedD3D12)
+                        {
+                            pinHint = " (hardware render works, but ANY WebGPU compute pipeline poisons the console's paravirtualized D3D12 driver - compute sites crash; gen6 defaults to the swiftshader rung for this reason)";
                         }
                         else if (mode == WebGpuMode.PinnedGles)
                         {
