@@ -539,7 +539,11 @@ function verdict(res) {
   }
   var allPass = STAGES.every(function (s) { return st(s.id) === 'PASS' || st(s.id) === 'SKIP'; }) && failed.length === 0;
   var complete = STAGES.every(function (s) { return res[s.id]; });
-  if (complete && allPass) out.push('Every test passed: compute, rendering and worker mapSync all work on this console.');
+  if (complete && allPass) {
+    var syncOk = st('W3') === 'PASS' && st('W4') === 'PASS';
+    out.push('Every test that could run passed: compute and rendering work on this console' +
+             (syncOk ? ', and so does worker mapSync.' : '. (mapSync could not be tested: it is not exposed in this session.)'));
+  }
   if (!complete) out.push((STAGES.length - Object.keys(res).length) + ' test(s) still to run.');
   return out;
 }
