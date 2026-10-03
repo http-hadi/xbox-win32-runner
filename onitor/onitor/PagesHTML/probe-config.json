@@ -1,20 +1,12 @@
 {
-  "enabled": false,
-  "version": 7,
+  "enabled": true,
+  "version": 8,
   "stages": [
-    "none",
-    "psocreate",
-    "upload",
-    "macupload",
-    "dispatch",
-    "copy",
-    "signal",
-    "full",
-    "webgpucheck"
+    "full"
   ],
   "haltOnFault": true,
   "settleMs": 800,
   "runOnFallback": true,
   "beaconTopic": "onitor-probe-k3v9xqz7",
-  "note": "v7 STAND-DOWN (1.6.5.0 / ladder gen7). Verified on console 2026-10-03: with runOnFallback=true the full compute ladder ran on the SwiftShader rung the app now defaults to and returned VERDICT ALL_STAGES_SURVIVED - dispatch, full (mapAsync+readback+verify) and webgpucheck (the exact webgpucheck.com compute test) all PASS. The D3D12 'microsoft' adapter is now classified as a fallback, so the crashing ladder is never run on the adapter that removes the device adapter-wide. Probe disabled for production; set enabled=true (and runOnFallback as needed) to re-arm a driver-debug session."
+  "note": "v8 SINGLE-DEVICE hardware question: the gen6/gen7 probe builds a BRAND NEW adapter+device for every stage and the D3D12 crash always lands on the 5th device. Is the failure 'D3D12 compute is impossible', or 'the probe exhausts paravirtualized D3D12 heaps first'? stages=['full'] runs exactly ONE device, one compute dispatch, one copy, one mapAsync - nothing before it. Also carries --enable-webgpu-developer-features so the real adapter description/architecture is unmasked."
 }
