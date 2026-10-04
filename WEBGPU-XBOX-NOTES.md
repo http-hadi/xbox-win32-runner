@@ -140,3 +140,52 @@ on the first compute site. It is a diagnostics setting, not a usable mode.
 WebGPU is not a supported WebView2 feature on Xbox — see
 [WebView2Feedback discussion #4138](https://github.com/MicrosoftEdge/WebView2Feedback/discussions/4138),
 where the reported symptom is `navigator.gpu` existing but yielding no device.
+
+---
+
+## UPDATE 2026-10-04: the Game Mode question — TESTED, and it does not fix it
+
+Xbox restricts resources by whether the OS classifies a title as an **App** or a
+**Game**. Per Microsoft, in development mode a DirectX 12 device created while
+**not** in Game Mode comes back as a **WARP software device** rather than the
+hardware device, and an App gets a shared 45% of the GPU and 1 GB while a Game
+gets 100% of the GPU and 5 GB. That made Game Mode the obvious suspect for the
+D3D12 compute failure, so it was tested end to end.
+
+What was done:
+
+1. `PUT /ext/settings/DefaultUWPContentTypeToGame` `{"Value":"True"}` on the
+   console's Device Portal API (this setting is `RequiresReboot: Yes`).
+2. Console rebooted; the setting persisted as `true`.
+3. App **uninstalled and freshly deployed** so the new default applied.
+4. App type confirmed set to **Game**.
+
+Result: **native D3D12 WebGPU compute still fails, identically.**
+
+```
+session START stages=full
+STAGE full FAILED (exception after 710ms):
+  Failed to execute 'mapAsync' on 'GPUBuffer':
+  A valid external Instance reference no longer exists.
+```
+
+The same single-device test (one fresh device, one dispatch, one copy, one
+`mapAsync`) passes when routed through the WebGL2/ANGLE-D3D11 engine and fails
+on native D3D12 — before and after Game Mode, before and after a reboot.
+
+Indicators also never changed: `/ext/app/runningtitle` stayed empty and the GPU
+partition stayed at 512 MB dedicated / 832 MB shared, i.e. the console did not
+report materially different resources.
+
+### Conclusion
+
+The D3D12 compute failure is **not** an App-vs-Game resource partition problem.
+It is specific to Dawn's D3D12 compute path on the Xbox `SraKmd_arden` driver:
+the device is created, the compute PSO is created, buffers are created, the
+command buffer submits successfully, and the device is then removed
+adapter-wide (`DXGI_ERROR_DRIVER_INTERNAL_ERROR` / GPU process `exit_code=34`),
+taking ANGLE's D3D11 device with it.
+
+That is why hardware compute is delivered through ANGLE/D3D11 instead. On the
+same GPU, in the same process, the D3D11 path executes compute correctly — so
+this is an API-path incompatibility, not a lack of GPU access.
