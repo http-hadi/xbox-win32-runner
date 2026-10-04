@@ -1,6 +1,6 @@
 {
-  "enabled": false,
-  "version": 8,
+  "enabled": true,
+  "version": 9,
   "stages": [
     "none",
     "psocreate",
@@ -16,5 +16,5 @@
   "settleMs": 800,
   "runOnFallback": true,
   "beaconTopic": "onitor-probe-k3v9xqz7",
-  "note": "v8 STAND-DOWN (1.6.6.0). WebGPU compute is impossible on this console's D3D12 driver and every other hardware backend is closed off; hardware compute is delivered instead by the WebGL2/ANGLE-D3D11 engine (hwcompute.js) behind wgpu-shim.js. Probe disabled for production - set enabled=true (and runOnFallback as needed) to re-arm a driver-debug session."
+  "note": "v9 ON-CONSOLE HARDWARE COMPUTE PROOF (1.6.6.0). The app installs the WebGL2/ANGLE-D3D11 compute engine behind navigator.gpu, so this ladder now runs THROUGH the shim on the console GPU (renderer: ANGLE (Microsoft, SraKmd_arden ... D3D11)). The probe's own two shaders are exactly the two the shim was verified against. If dispatch/full/webgpucheck pass here, WebGPU compute is running on the console GPU."
 }
