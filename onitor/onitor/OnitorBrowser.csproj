@@ -267,6 +267,9 @@
     <Content Include="PagesHTML\hwcompute.js" />
     <Content Include="PagesHTML\HwCompute.html" />
     <Content Include="PagesHTML\wgpu-shim.js" />
+    <Content Include="d3d11probe.dll">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
     <Content Include="PagesHTML\NoInternet.html" />
     <Content Include="PagesHTML\NotFound.html" />
     <Content Include="PagesHTML\script.js" />

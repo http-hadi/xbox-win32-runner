@@ -416,6 +416,7 @@ namespace onitor.Classes
         private const string ModeFileName = "webgpu-mode.txt";
         private const string StatusFileName = "webgpu-status.txt";
         private const string HwComputeModeFileName = "hwcompute-mode.txt";
+        private const string D3D11ProbeFileName = "d3d11probe.txt";
 
         // Records which ladder generation ran last. Bump the value whenever
         // the rung set or startup behaviour changes - consoles coming from
@@ -577,11 +578,20 @@ namespace onitor.Classes
       // SwiftShader adapter (ladder rung 4) reports isFallback=false, so the
       // flag alone lied in v1.4.0.0 (green badge with 'adapter: SwiftShader').
       var hay = d + ' ' + (info.vendor || '') + ' ' + (info.architecture || '');
-      var soft = fb || /swiftshader|software|llvmpipe|basic render|basicrender|warp|microsoft/i.test(hay);
+      // The hardware-compute shim presents the real console renderer as its
+      // description - measured on the console as
+      //   ANGLE (Microsoft, SraKmd_arden (0x0000D000) Direct3D11 vs_5_0 ps_5_0, D3D11)
+      // - which contains 'microsoft' (the D3D11 vendor, NOT WARP). It must be
+      // recognised FIRST or the name test below calls the console GPU software.
+      var isShim = /wgpu-shim/i.test(hay);
+      var soft = !isShim && (fb || /swiftshader|software|llvmpipe|basic render|basicrender|warp|microsoft/i.test(hay));
       if (d) d = String(d);
       if (d.length > 46) d = d.slice(0, 45) + '\u2026';
       var who = d || String(info.vendor || '');
-      if (soft) {
+      if (isShim) {
+        paint('ok', 'WebGPU: hardware \u2713',
+          'compute runs on the console GPU' + (gl2 ? ' \u00b7 ' + gl2 : ''));
+      } else if (soft) {
         var tag = /swiftshader/i.test(hay) ? ' \u00b7 SwiftShader'
                 : (/microsoft|warp|basic render/i.test(hay) ? ' \u00b7 Microsoft (no compute)' : '');
         paint('soft', 'WebGPU: software' + tag,
@@ -933,6 +943,73 @@ namespace onitor.Classes
             }
         }
 
+        // ---- native D3D11 compute probe (diagnostic) ---------------------
+        // Answers the one question that decides whether a native compute
+        // backend could ever replace the WebGL2 engine: can a native D3D11
+        // compute shader (cs_5_0) actually EXECUTE in this app container?
+        //
+        // ANGLE's D3D11 path working proves vertex/pixel shading works; compute
+        // is a different pipeline stage and is NOT implied by it. D3D12 is a
+        // dead end here (Dawn's compute dispatch removes the device
+        // adapter-wide and kills the GPU process), so D3D11 is the candidate.
+        //
+        // Built from probe/d3d11probe.cpp in the workspace; validated locally
+        // against a desktop build before shipping.
+        [System.Runtime.InteropServices.DllImport("d3d11probe.dll",
+            CallingConvention = System.Runtime.InteropServices.CallingConvention.StdCall,
+            CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+        private static extern int RunD3D11ComputeProbe(
+            [System.Runtime.InteropServices.Out] System.Text.StringBuilder report, int chars);
+
+        [System.Runtime.InteropServices.DllImport("d3d11probe.dll",
+            CallingConvention = System.Runtime.InteropServices.CallingConvention.StdCall,
+            CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+        private static extern int ProbePing(
+            [System.Runtime.InteropServices.Out] System.Text.StringBuilder report, int chars);
+
+        private static void RunD3D11ProbeIfRequested()
+        {
+            try
+            {
+                string trigger = LocalStatePath(D3D11ProbeFileName);
+                if (!System.IO.File.Exists(trigger)) return;
+
+                // Step 1: prove we got this far at all.
+                AppendWebGpuStatus("d3d11probe| step1 entered (trigger file found)");
+
+                // Step 2: prove the DLL loads and an export is callable, with no
+                // D3D11 involved. If the process dies before step2 is logged,
+                // loading the DLL is what kills it; if step2 logs but step3
+                // never does, D3D11-in-container is what kills it.
+                var ping = new System.Text.StringBuilder(512);
+                try
+                {
+                    int prc = ProbePing(ping, ping.Capacity);
+                    AppendWebGpuStatus("d3d11probe| step2 ping rc=" + prc + " -> " + ping.ToString());
+                }
+                catch (Exception ex)
+                {
+                    AppendWebGpuStatus("d3d11probe| step2 ping THREW: " + ex.GetType().Name + ": " + ex.Message);
+                    return;
+                }
+
+                // Step 3: the real D3D11 compute work.
+                AppendWebGpuStatus("d3d11probe| step3 calling RunD3D11ComputeProbe...");
+                var sb = new System.Text.StringBuilder(16384);
+                int rc = RunD3D11ComputeProbe(sb, sb.Capacity);
+                foreach (string raw in sb.ToString().Split('\n'))
+                {
+                    string line = raw.Trim();
+                    if (line.Length > 0) AppendWebGpuStatus("d3d11probe| " + line);
+                }
+                AppendWebGpuStatus("d3d11probe| step3 returned rc=" + rc);
+            }
+            catch (Exception ex)
+            {
+                AppendWebGpuStatus("d3d11probe| WRAPPER THREW: " + ex.GetType().Name + ": " + ex.Message);
+            }
+        }
+
         private static bool LadderGenerationIsCurrent()
         {
             try
@@ -1107,6 +1184,10 @@ namespace onitor.Classes
                 {
                     Debug.WriteLine("[Onitor] Could not install hardware compute shim: " + ex.Message);
                 }
+
+                // One-shot native D3D11 compute probe (diagnostic, opt-in).
+                // Runs only when <LocalState>\d3d11probe.txt exists.
+                RunD3D11ProbeIfRequested();
 
                 ApplySettings();
                 if (!string.IsNullOrEmpty(_pendingUserAgent))
@@ -1363,8 +1444,16 @@ namespace onitor.Classes
                     "        try { var i=a.info||{}; d=i.description||''; ar=i.architecture||''; vn=i.vendor||'';" +
                     "          if(!d && !ar && !vn && typeof a.requestAdapterInfo==='function'){ var ri=a.requestAdapterInfo(); if(ri){ d=ri.description||''; ar=ri.architecture||''; vn=ri.vendor||''; } } } catch(e){}" +
                     "        var v=(ar?ar+' ':'')+vn;" +
-                    "        var soft = fb || /swiftshader|software|llvmpipe|basic render|basicrender|warp|microsoft/i.test(d+' '+v);" +
-                    "        window.__onitorWgpuProbe = (soft?'fallback:':'gpu:') + String(d||v).slice(0,90);" +
+                    // The hardware-compute shim answers first and MUST be
+                    // recognised before the software-name test: its description
+                    // is the real console renderer, measured on the console as
+                    //   ANGLE (Microsoft, SraKmd_arden (0x0000D000) Direct3D11 vs_5_0 ps_5_0, D3D11)
+                    // 'Microsoft' there is the D3D11 vendor, not WARP, so the
+                    // gen7 name test would otherwise report the console GPU as
+                    // software even though compute runs on it through the shim.
+                    "        var isShim = /wgpu-shim/i.test(String(d)+' '+String(vn)+' '+String(ar));" +
+                    "        var soft = !isShim && (fb || /swiftshader|software|llvmpipe|basic render|basicrender|warp|microsoft/i.test(d+' '+v));" +
+                    "        window.__onitorWgpuProbe = (isShim?'gpu:':(soft?'fallback:':'gpu:')) + String(d||v).slice(0,90);" +
                     "      } catch(e){ window.__onitorWgpuProbe = 'error'; }" +
                     "    }, function(){ window.__onitorWgpuProbe = 'error'; });" +
                     "    return 'pending';" +
